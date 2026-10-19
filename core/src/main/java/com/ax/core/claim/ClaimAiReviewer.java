@@ -59,10 +59,15 @@ public class ClaimAiReviewer {
                 - 상품: %s
                 - 청구 유형: %s
                 - 진료일: %s
-                - 진단/치료 내용: %s
+                - 진단/치료 내용: %s (질병코드 %s)
                 - 청구 금액: %s원
-                보장 대상 여부, 면책 사유 해당 여부, 예상 지급액(계산 과정 포함)을 약관 조항을 근거로 알려주세요."""
+                - 시스템 점검 결과: %s
+                보장 대상 여부, 면책 사유 해당 여부, 예상 지급액(계산 과정 포함)을 약관 조항을 근거로 알려주세요.
+                시스템 점검 결과에 부담보나 고지의무 위반 의심이 있으면 심사 시 유의사항으로 함께 정리해 주세요."""
                 .formatted(claim.getContract().getProduct().getPolicyDocument(), claim.getType().getLabel(),
-                        claim.getTreatmentDate(), claim.getDiagnosis(), amount);
+                        claim.getTreatmentDate(), claim.getDiagnosis(),
+                        claim.getKcdCode() == null ? "미입력" : claim.getKcdCode(), amount,
+                        claim.getCheckNotes() == null || claim.getCheckNotes().isEmpty()
+                                ? "특이사항 없음" : String.join(" / ", claim.getCheckNotes()));
     }
 }

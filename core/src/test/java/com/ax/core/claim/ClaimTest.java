@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.ax.core.common.BusinessException;
 import com.ax.core.contract.Contract;
 import com.ax.core.customer.Customer;
+import com.ax.core.customer.Gender;
 import com.ax.core.product.Product;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
@@ -13,19 +14,19 @@ import org.junit.jupiter.api.Test;
 class ClaimTest {
 
     static Contract contract() {
-        return new Contract("CT1", new Customer("홍길동", LocalDate.of(1995, 1, 1), null),
-                new Product("P1", "샘플 실손", "샘플_실손의료비보험"),
-                LocalDate.of(2026, 1, 1), LocalDate.of(2030, 12, 31), 30_000);
+        return new Contract("CT1", new Customer("홍길동", LocalDate.of(1995, 1, 1), Gender.M, null),
+                new Product("P1", "샘플 실손", "샘플_실손의료비보험", 65), null,
+                LocalDate.of(2026, 1, 1), LocalDate.of(2030, 12, 31));
     }
 
     static Claim claim(long amount) {
-        return new Claim("CL1", contract(), ClaimType.OUTPATIENT, LocalDate.of(2026, 10, 1), "급성 위염", amount);
+        return new Claim("CL1", contract(), ClaimType.OUTPATIENT, LocalDate.of(2026, 10, 1), "급성 위염", "K29.7", amount);
     }
 
     @Test
     void 보장기간_밖의_진료는_접수할_수_없다() {
         assertThatThrownBy(() ->
-                new Claim("CL1", contract(), ClaimType.OUTPATIENT, LocalDate.of(2025, 12, 31), "감기", 10_000))
+                new Claim("CL1", contract(), ClaimType.OUTPATIENT, LocalDate.of(2025, 12, 31), "감기", "J00", 10_000))
                 .isInstanceOf(BusinessException.class);
     }
 
@@ -34,7 +35,7 @@ class ClaimTest {
         Contract contract = contract();
         contract.terminate();
         assertThatThrownBy(() ->
-                new Claim("CL1", contract, ClaimType.OUTPATIENT, LocalDate.of(2026, 10, 1), "감기", 10_000))
+                new Claim("CL1", contract, ClaimType.OUTPATIENT, LocalDate.of(2026, 10, 1), "감기", "J00", 10_000))
                 .isInstanceOf(BusinessException.class);
     }
 

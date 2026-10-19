@@ -15,9 +15,12 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Entity
@@ -45,12 +48,20 @@ public class Claim extends BaseTimeEntity {
     @Column(nullable = false, length = 200)
     private String diagnosis;
 
+    /** 질병코드(KCD). 부담보·고지위반 점검에 사용 */
+    @Column(length = 10)
+    private String kcdCode;
+
     @Column(nullable = false)
     private long claimedAmount;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ClaimStatus status;
+
+    /** 접수 시 규칙 점검 결과 (부담보 해당, 고지의무 위반 의심 등) */
+    @JdbcTypeCode(SqlTypes.JSON)
+    private List<String> checkNotes;
 
     // AI 검토 결과 (참고용 의견)
     @Column(columnDefinition = "text")
@@ -67,7 +78,7 @@ public class Claim extends BaseTimeEntity {
     private LocalDateTime decidedAt;
 
     public Claim(String claimNo, Contract contract, ClaimType type, LocalDate treatmentDate,
-                 String diagnosis, long claimedAmount) {
+                 String diagnosis, String kcdCode, long claimedAmount) {
         if (!contract.coversDate(treatmentDate)) {
             throw new BusinessException("진료일(" + treatmentDate + ")에 유효한 계약이 아닙니다.");
         }
@@ -76,8 +87,13 @@ public class Claim extends BaseTimeEntity {
         this.type = type;
         this.treatmentDate = treatmentDate;
         this.diagnosis = diagnosis;
+        this.kcdCode = kcdCode;
         this.claimedAmount = claimedAmount;
         this.status = ClaimStatus.RECEIVED;
+    }
+
+    public void attachCheckNotes(List<String> notes) {
+        this.checkNotes = List.copyOf(notes);
     }
 
     public void startAiReview() {

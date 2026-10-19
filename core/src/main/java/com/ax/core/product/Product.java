@@ -1,11 +1,16 @@
 package com.ax.core.product;
 
 import com.ax.core.common.BaseTimeEntity;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -29,9 +34,23 @@ public class Product extends BaseTimeEntity {
     @Column(nullable = false, length = 100)
     private String policyDocument;
 
-    public Product(String code, String name, String policyDocument) {
+    /** 가입 가능 최대 나이 (만 나이) */
+    @Column(nullable = false)
+    private int maxEntryAge;
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id")
+    private List<Coverage> coverages = new ArrayList<>();
+
+    public Product(String code, String name, String policyDocument, int maxEntryAge) {
         this.code = code;
         this.name = name;
         this.policyDocument = policyDocument;
+        this.maxEntryAge = maxEntryAge;
+    }
+
+    public Product addCoverage(String code, String name, CoverageCategory category, long monthlyRatePer10M) {
+        coverages.add(new Coverage(this, code, name, category, monthlyRatePer10M));
+        return this;
     }
 }

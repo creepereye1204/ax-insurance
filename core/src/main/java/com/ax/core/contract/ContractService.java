@@ -1,13 +1,11 @@
 package com.ax.core.contract;
 
-import com.ax.core.common.BusinessException;
+import com.ax.core.application.Application;
 import com.ax.core.common.NotFoundException;
-import com.ax.core.customer.Customer;
-import com.ax.core.customer.CustomerRepository;
-import com.ax.core.product.Product;
-import com.ax.core.product.ProductRepository;
+import com.ax.core.uw.UwCoverageResult;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,21 +15,23 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ContractService {
 
-    private final ContractRepository contractRepository;
-    private final CustomerRepository customerRepository;
-    private final ProductRepository productRepository;
+    static final int TERM_YEARS = 10;
 
+    private final ContractRepository contractRepository;
+
+    /** 심사에서 인수된 담보만으로 계약을 성립시킨다. 부담보 기간은 계약일부터 계산한다. */
     @Transactional
-    public Contract create(Long customerId, Long productId, LocalDate startDate, LocalDate endDate, long monthlyPremium) {
-        if (!endDate.isAfter(startDate)) {
-            throw new BusinessException("보험 종료일은 시작일 이후여야 합니다.");
+    public Contract issue(Application application, List<UwCoverageResult> acceptedResults) {
+        LocalDate start = LocalDate.now();
+        Contract contract = new Contract(newContractNo(), application.getCustomer(), application.getProduct(),
+                application, start, start.plusYears(TERM_YEARS).minusDays(1));
+        for (UwCoverageResult r : acceptedResults) {
+            List<ContractExclusion> exclusions = r.getExclusions().stream()
+                    .map(e -> new ContractExclusion(e.label(), e.kcd(), start.plusMonths(e.months()).minusDays(1)))
+                    .toList();
+            contract.addCoverage(new ContractCoverage(r.getCoverage(), r.getInsuredAmount(), r.getRatingPct(), exclusions));
         }
-        Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new NotFoundException("고객", customerId));
-        Product product = productRepository.findById(productId)
-                .orElseThrow(() -> new NotFoundException("상품", productId));
-        return contractRepository.save(
-                new Contract(newContractNo(), customer, product, startDate, endDate, monthlyPremium));
+        return contractRepository.save(contract);
     }
 
     @Transactional(readOnly = true)
@@ -46,7 +46,7 @@ public class ContractService {
         return contract;
     }
 
-    private String newContractNo() {
+    public static String newContractNo() {
         return "CT" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
                 + String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
     }

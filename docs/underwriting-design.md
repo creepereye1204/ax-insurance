@@ -110,13 +110,12 @@ erDiagram
 
 ## 5. 상태 머신
 
-**청약 (APPLICATION)**
+**청약 (APPLICATION)** — 구현에서는 작성·제출을 한 번에 처리하고, 제출 직후 전산심사를 실행한다.
 ```
-DRAFT ─제출→ SUBMITTED ─전산심사→ AUTO_APPROVED ─────────────┐
-                              ├→ REFERRED ─본사결정→ APPROVED ─┼→ ISSUED (계약 성립)
-                              │                  └→ DECLINED   │
-                              └→ AUTO_DECLINED / POSTPONED      │
-                                                 CONDITIONAL ──┘ (부담보·할증 조건 승인)
+제출 ─전산심사─┬→ ISSUED (전 담보 표준/조건부 → 자동 승인, 계약 성립)
+              ├→ UNDER_REVIEW (본사 이관) ─심사자 결정─→ ISSUED / DECLINED
+              ├→ POSTPONED (연기)
+              └→ DECLINED (전 담보 거절)
 ```
 
 **심사 케이스 (UW_CASE.stage)**: `PRE_UW`(선심사) → `AUTO_UW`(전산) → `MANUAL_UW`(본사).
@@ -144,7 +143,7 @@ DRAFT ─제출→ SUBMITTED ─전산심사→ AUTO_APPROVED ──────
   "priority": 10,
   "scope": "COVERAGE",
   "condition": {
-    "source": "DISCLOSURE",
+    "source": "MEDICAL",
     "kcd": ["E10*", "E11*", "E12*", "E13*", "E14*"],
     "withinMonths": 60,
     "treatment": ["MEDICATION", "INPATIENT"]
@@ -154,7 +153,7 @@ DRAFT ─제출→ SUBMITTED ─전산심사→ AUTO_APPROVED ──────
 }
 ```
 
-- `source`: `DISCLOSURE`(고지 상세) / `ANSWER`(문항 응답) / `CLAIM_HISTORY`(내부 청구 이력) / `APPLICANT`(나이 등) / `RISK_SCORE`(위험도 모델)
+- `source`: `ANSWER`(문항 응답) / `MEDICAL`(의료 이력: 전산심사는 고지 상세, 선심사는 청구이력·외부기관) / `CLAIM_COUNT`(당사 청구 횟수) / `AGE`(나이). 위험도 모델(`RISK_SCORE`)은 추후
 - `scope`: `APPLICATION`(청약 전체) / `COVERAGE`(특정 담보 카테고리, `coverageCategories` 로 지정)
 - `action`: `STANDARD` / `RATING`(할증) / `EXCLUSION`(부담보) / `REFER`(본사 이관) / `POSTPONE`(연기) / `DECLINE`(거절)
 
@@ -216,7 +215,7 @@ DECLINE > POSTPONE > REFER > EXCLUSION / RATING > STANDARD
 | POST | `/uw/cases/{id}/decision` | 언더라이터 담보별 결정 |
 | GET | `/questionnaires/current`, `/kcd?q=` | 현재 고지 문항, 질병코드 검색 |
 
-## 11. 구현 순서
+## 11. 구현 순서 (1~5 완료, 2026-10-19)
 
 1. 고객관리 (목록·검색·상세·등록, 마스킹) + 화면 레이아웃(메뉴)
 2. 상품·담보, 고지 문항(버전), 청약 + 고지 입력 화면
