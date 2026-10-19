@@ -1,0 +1,8 @@
+anthropic
+ollama
+fastapi
+uvicorn[standard]
+psycopg[binary,pool]
+pgvector
+sentence-transformers
+pypdf

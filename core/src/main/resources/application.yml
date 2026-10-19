@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: ax-core
+  datasource:
+    # 같은 Postgres 인스턴스, core 스키마로 분리
+    url: ${DB_URL:jdbc:postgresql://localhost:55440/ax?currentSchema=core}
+    username: ${DB_USER:ax}
+    password: ${DB_PASSWORD:ax}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        default_schema: core
+  threads:
+    virtual:
+      enabled: true
+
+ax:
+  ai:
+    base-url: ${AI_BASE_URL:http://localhost:8030}
+    connect-timeout: 3s
+    # 로컬 LLM 은 콜드 스타트 시 1분 이상 걸릴 수 있음
+    read-timeout: 180s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

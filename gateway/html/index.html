@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ax · 보험 AI 심사 보조</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --ink: #1b1f24; --muted: #5d6673; --line: #e2e5ea;
+    --accent: #1f5fbf; --accent-ink: #fff; --ok: #1a7f4b; --warn: #a15c00; --bad: #b42318; --code: #f0f2f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111418; --panel: #191d22; --ink: #e6e9ed; --muted: #9aa3ae; --line: #2a3038;
+      --accent: #5b9bf0; --accent-ink: #0b1220; --ok: #4cc38a; --warn: #f0a640; --bad: #f97066; --code: #20252c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 32px 16px 64px; }
+  header h1 { margin: 0 0 4px; font-size: 26px; }
+  header p { margin: 0; color: var(--muted); }
+  .arch { margin: 20px 0 28px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; overflow-x: auto; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; color: var(--muted); }
+  .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+  .tabs button { border: 0; background: none; color: var(--muted); padding: 10px 14px; font: inherit; cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+  input, select, textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--ink); font: inherit; }
+  textarea { resize: vertical; min-height: 64px; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .btn { border: 0; border-radius: 8px; padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); }
+  .btn.ghost { background: none; color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+  .chips button { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 999px;
+    padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .answer { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .answer h3, .answer h4 { margin: 14px 0 6px; font-size: 15px; }
+  .answer p { margin: 6px 0; }
+  .answer ul { margin: 6px 0; padding-left: 20px; }
+  .trace { margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .trace code { background: var(--code); padding: 1px 6px; border-radius: 4px; color: var(--ink); }
+  .trace li { margin: 3px 0; }
+  .status { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+  .step { padding: 4px 10px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); color: var(--muted); }
+  .step.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .step.done { color: var(--ink); }
+  .badge { font-weight: 600; }
+  .badge.APPROVED { color: var(--ok); } .badge.REJECTED { color: var(--bad); } .badge.MANUAL_REVIEW { color: var(--warn); }
+  .error { color: var(--bad); margin-top: 10px; }
+  .note { margin-top: 28px; font-size: 13px; color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ax · 보험 AI 심사 보조</h1>
+    <p>약관 근거로 답하는 AI 에이전트와, 이를 호출하는 미니 기간계(계약·청구) 시스템</p>
+  </header>
+
+  <div class="arch">[채널] ── 청구 접수 ──▶ [기간계 · Spring Boot]  ── 비동기 검토 요청 ──▶ [AI 서비스 · FastAPI]
+                          계약 / 청구 원장                             Agent Loop (Gemma 4, 로컬 GPU)
+                          AI 장애 시 수동심사 전환                      ├ search_policy  약관 벡터 검색 (pgvector)
+                          최종 결정은 심사자                            ├ get_article    조항 전문 조회
+                                                                     └ list_products  상품 목록</div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="qa">약관 Q&amp;A</button>
+    <button role="tab" aria-selected="false" data-tab="claim">청구 심사 데모</button>
+  </div>
+
+  <!-- 약관 Q&A -->
+  <section id="tab-qa" class="panel">
+    <label for="q">질문</label>
+    <textarea id="q" placeholder="예) 쌍꺼풀 수술하면 실손보험 보상 받을 수 있어?"></textarea>
+    <div class="chips" id="examples"></div>
+    <div class="actions">
+      <button class="btn" id="ask">질문하기</button>
+      <span class="hint" id="ask-hint">로컬 GPU에서 실행돼 20~60초 정도 걸려요.</span>
+    </div>
+    <div id="qa-error" class="error" hidden></div>
+    <div id="qa-result" class="answer" hidden>
+      <div id="qa-answer"></div>
+      <div class="trace"><strong>에이전트 실행 기록</strong><ul id="qa-trace"></ul></div>
+    </div>
+  </section>
+
+  <!-- 청구 심사 -->
+  <section id="tab-claim" class="panel" hidden>
+    <p class="hint" id="contract-info">데모 계약 정보를 불러오는 중…</p>
+    <div class="row">
+      <div><label for="c-type">청구 유형</label>
+        <select id="c-type"><option value="OUTPATIENT">통원</option><option value="INPATIENT">입원</option><option value="PRESCRIPTION">처방조제</option></select></div>
+      <div><label for="c-date">진료일</label><input id="c-date" type="date"></div>
+      <div><label for="c-amount">청구 금액 (원)</label><input id="c-amount" type="number" min="1" step="1000" value="50000"></div>
+    </div>
+    <div style="margin-bottom:12px"><label for="c-diag">진단 / 치료 내용</label>
+      <input id="c-diag" value="급성 장염으로 내과 외래 진료"></div>
+    <div class="actions">
+      <button class="btn" id="submit-claim">청구 접수</button>
+      <span class="hint">접수는 즉시 완료되고, AI 검토는 뒤에서 비동기로 진행돼요.</span>
+    </div>
+    <div id="claim-error" class="error" hidden></div>
+
+    <div id="claim-result" hidden>
+      <div class="status" id="claim-steps"></div>
+      <div class="hint" id="claim-meta"></div>
+      <div class="answer" id="claim-opinion" hidden></div>
+      <div id="decide" class="actions" style="margin-top:14px" hidden>
+        <input id="pay" type="number" min="1" step="1000" style="max-width:160px" aria-label="지급액">
+        <button class="btn" id="approve">지급 승인</button>
+        <button class="btn ghost" id="reject">부지급</button>
+        <span class="hint">AI는 의견만 제시하고, 최종 결정은 심사자가 해요.</span>
+      </div>
+    </div>
+  </section>
+
+  <p class="note">
+    ※ 데모의 약관은 테스트용 가상 약관이며 실제 보험상품이 아닙니다. 답변은 참고용입니다.
+    · 소스 코드: <a href="https://github.com/creepereye1204/insurance.r-e.kr">github.com/creepereye1204/insurance.r-e.kr</a>
+  </p>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const DEMO_CONTRACT_ID = 1;
+
+// ---------- 탭 ----------
+document.querySelectorAll('[role=tab]').forEach((t) => t.addEventListener('click', () => {
+  document.querySelectorAll('[role=tab]').forEach((x) => x.setAttribute('aria-selected', x === t));
+  $('tab-qa').hidden = t.dataset.tab !== 'qa';
+  $('tab-claim').hidden = t.dataset.tab !== 'claim';
+}));
+
+// ---------- 공통 ----------
+async function api(path, options = {}) {
+  const res = await fetch(path, { headers: { 'content-type': 'application/json' }, ...options });
+  if (res.status === 429) throw new Error('요청이 많아요. 잠시 후 다시 시도해 주세요. (공용 GPU 보호를 위한 제한)');
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.detail || `요청 실패 (${res.status})`);
+  return body;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// LLM 응답용 최소 마크다운 렌더러 (제목, 굵게, 목록, 문단)
+function renderMarkdown(md) {
+  const lines = escapeHtml(md).split('\n');
+  let html = '', inList = false;
+  for (const raw of lines) {
+    const line = raw.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    const li = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)$/);
+    if (li) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${li[1]}</li>`; continue; }
+    if (inList) { html += '</ul>'; inList = false; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) html += `<h4>${h[2]}</h4>`;
+    else if (line.trim()) html += `<p>${line}</p>`;
+  }
+  return html + (inList ? '</ul>' : '');
+}
+
+const won = (n) => n == null ? '-' : Number(n).toLocaleString('ko-KR') + '원';
+
+// ---------- 약관 Q&A ----------
+const EXAMPLES = [
+  '쌍꺼풀 수술하면 실손보험 보상 받을 수 있어?',
+  '통원 치료비 5만원 나왔으면 얼마 받아?',
+  '보험금 청구할 때 필요한 서류가 뭐야?',
+  '출산으로 입원하면 보상돼?',
+];
+EXAMPLES.forEach((q) => {
+  const b = document.createElement('button');
+  b.textContent = q;
+  b.onclick = () => { $('q').value = q; };
+  $('examples').append(b);
+});
+
+$('ask').onclick = async () => {
+  const question = $('q').value.trim();
+  if (!question) return;
+  $('ask').disabled = true; $('qa-error').hidden = true; $('qa-result').hidden = true;
+  const started = Date.now();
+  const timer = setInterval(() => { $('ask-hint').textContent = `AI가 약관을 검토 중이에요… ${Math.round((Date.now() - started) / 1000)}초`; }, 1000);
+  try {
+    const r = await api('/ai/chat', { method: 'POST', body: JSON.stringify({ question }) });
+    $('qa-answer').innerHTML = renderMarkdown(r.answer || '(빈 응답)');
+    $('qa-trace').innerHTML = r.trace.map((t) =>
+      `<li><code>${escapeHtml(t.tool)}</code> ${escapeHtml(JSON.stringify(t.input))} · ${t.latency_ms}ms${t.is_error ? ' · 오류' : ''}</li>`
+    ).join('') + `<li>모델 <code>${escapeHtml(r.model)}</code> · 토큰 ${r.input_tokens} / ${r.output_tokens} · 총 ${(r.latency_ms / 1000).toFixed(1)}초</li>`;
+    $('qa-result').hidden = false;
+  } catch (e) {
+    $('qa-error').textContent = e.message; $('qa-error').hidden = false;
+  } finally {
+    clearInterval(timer); $('ask').disabled = false; $('ask-hint').textContent = '로컬 GPU에서 실행돼 20~60초 정도 걸려요.';
+  }
+};
+
+// ---------- 청구 심사 ----------
+const STEPS = [['RECEIVED', '접수'], ['AI_REVIEWING', 'AI 검토 중'], ['AI_REVIEWED', 'AI 검토 완료'], ['DECIDED', '심사 결정']];
+let currentClaim = null, pollTimer = null;
+
+$('c-date').value = new Date().toISOString().slice(0, 10);
+
+api(`/core/contracts/${DEMO_CONTRACT_ID}`).then((c) => {
+  $('contract-info').textContent = `데모 계약 ${c.contractNo} · ${c.productName} · 보장기간 ${c.startDate} ~ ${c.endDate}`;
+}).catch(() => { $('contract-info').textContent = '데모 계약을 불러오지 못했어요.'; });
+
+function renderClaim(c) {
+  currentClaim = c;
+  const decided = c.status === 'APPROVED' || c.status === 'REJECTED';
+  const idx = decided ? 3 : c.status === 'MANUAL_REVIEW' ? 2 : STEPS.findIndex(([s]) => s === c.status);
+  $('claim-steps').innerHTML = STEPS.map(([s, label], i) => {
+    let text = label;
+    if (i === 2 && c.status === 'MANUAL_REVIEW') text = 'AI 실패 → 수동심사';
+    if (i === 3 && decided) text = c.status === 'APPROVED' ? '지급 승인' : '부지급';
+    return `<span class="step ${i < idx ? 'done' : ''} ${i === idx ? 'on' : ''}">${text}</span>`;
+  }).join('');
+  $('claim-meta').innerHTML = `청구번호 ${c.claimNo} · 청구액 ${won(c.claimedAmount)}`
+    + (decided ? ` · <span class="badge ${c.status}">지급액 ${won(c.paidAmount)}</span>` : '');
+  if (c.aiOpinion) { $('claim-opinion').innerHTML = renderMarkdown(c.aiOpinion); $('claim-opinion').hidden = false; }
+  $('decide').hidden = !(c.status === 'AI_REVIEWED' || c.status === 'MANUAL_REVIEW');
+  $('claim-result').hidden = false;
+}
+
+async function poll() {
+  const c = await api(`/core/claims/${currentClaim.id}`);
+  renderClaim(c);
+  if (c.status === 'RECEIVED' || c.status === 'AI_REVIEWING') pollTimer = setTimeout(poll, 3000);
+}
+
+$('submit-claim').onclick = async () => {
+  clearTimeout(pollTimer);
+  $('claim-error').hidden = true; $('claim-opinion').hidden = true; $('submit-claim').disabled = true;
+  try {
+    const c = await api('/core/claims', { method: 'POST', body: JSON.stringify({
+      contractId: DEMO_CONTRACT_ID, type: $('c-type').value, treatmentDate: $('c-date').value,
+      diagnosis: $('c-diag').value.trim(), amount: Number($('c-amount').value),
+    }) });
+    $('pay').value = c.claimedAmount;
+    renderClaim(c);
+    pollTimer = setTimeout(poll, 2000);
+  } catch (e) {
+    $('claim-error').textContent = e.message; $('claim-error').hidden = false;
+  } finally {
+    $('submit-claim').disabled = false;
+  }
+};
+
+async function decide(action, body) {
+  try {
+    renderClaim(await api(`/core/claims/${currentClaim.id}/${action}`, { method: 'POST', body: JSON.stringify(body) }));
+  } catch (e) {
+    $('claim-error').textContent = e.message; $('claim-error').hidden = false;
+  }
+}
+$('approve').onclick = () => decide('approve', { paidAmount: Number($('pay').value), comment: '데모 심사자 승인' });
+$('reject').onclick = () => decide('reject', { comment: '데모 심사자 부지급' });
+</script>
+</body>
+</html>
