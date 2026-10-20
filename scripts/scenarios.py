@@ -77,6 +77,21 @@ def apply(proposal, cust, yes=None, agreements=None):
         "signature": {"signerName": cust["name"], "agreements": agreements if agreements is not None else required}})
 
 
+def issued(detail, allowed_refer_rules=("R-CLM-01",)):
+    """계약 성립까지 진행. 같은 서버에서 시나리오를 반복 실행하면 청구가 누적돼 잦은 청구 룰(R-CLM-01)로
+    본사 이관될 수 있다 — 그 경우 심사자 승인을 거쳐 계약을 성립시킨다(반복 실행 안정성)."""
+    if detail["summary"]["status"] == "UNDER_REVIEW":
+        case = detail["uwCase"]
+        referred = [x for x in case["results"] if x["outcome"] == "REFER"]
+        assert all(set(x["matchedRules"]) & set(allowed_refer_rules) for x in referred), \
+            f"예상 밖 본사 이관: {[x['matchedRules'] for x in referred]}"
+        choices = {str(r["coverageId"]): "ACCEPT_PROPOSED" for r in case["results"]}
+        call("POST", f"/uw/cases/{case['id']}/decision", {"choices": choices, "underwriter": "시나리오", "comment": "반복 실행"})
+        detail = call("GET", f"/applications/{detail['summary']['id']}")
+    assert detail["summary"]["status"] == "ISSUED" and detail["contractId"], detail["summary"]
+    return detail
+
+
 def scenario(name):
     def wrap(fn):
         started = time.time()
@@ -125,7 +140,7 @@ def _():
     sample = call("GET", "/products?q=" + urllib.parse.quote("샘플") + "&size=5")["content"][0]
     p = design(c, call("GET", f"/products/{sample['id']}"), 20)
     _, d = apply(p, c)
-    assert d["summary"]["status"] == "ISSUED", d["summary"]
+    d = issued(d)
     claim = call("POST", "/claims", {"contractId": d["contractId"], "type": "OUTPATIENT",
                                      "treatmentDate": time.strftime("%Y-%m-%d"), "diagnosis": "위염 외래",
                                      "kcdCode": "K29.7", "amount": 50000})
@@ -178,7 +193,7 @@ def _():
     p = design(c, call("GET", f"/products/{sample['id']}"), 20)
     _, d = apply(p, c, {"Q3": [{"kcdCode": "S82.2", "diagnosedOn": time.strftime("%Y-%m-%d", time.localtime(time.time() - 180 * 86400)),
                                 "treatment": "SURGERY", "treatmentDays": 10, "cured": False}]})
-    assert d["summary"]["status"] == "ISSUED", d["summary"]
+    d = issued(d)
     claim = call("POST", "/claims", {"contractId": d["contractId"], "type": "OUTPATIENT",
                                      "treatmentDate": time.strftime("%Y-%m-%d"), "diagnosis": "골절 재활",
                                      "kcdCode": "S82.2", "amount": 80000})
