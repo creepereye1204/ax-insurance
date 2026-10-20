@@ -299,6 +299,25 @@ def _():
     return "검증 3건 정상"
 
 
+@scenario("S15 전산심사 사전 실행: 김정상 자동 승인 예상 / 박당뇨 당뇨 고지 시 본사 이관 예상 (저장 안 됨)")
+def _():
+    qn = call("GET", "/questionnaires/current")
+    def simulate(cust, yes=None):
+        prod = product("HEALTH", lambda x: not x["simplifiedUw"])
+        p = design(cust, prod, 20)
+        yes = yes or {}
+        answers = [{"questionId": q["id"], "answer": q["code"] in yes, "details": yes.get(q["code"], [])} for q in qn["questions"]]
+        return p, call("POST", "/applications/underwrite-preview",
+                       {"proposalId": p["id"], "questionnaireId": qn["id"], "answers": answers})
+    _, ok = simulate(customer("김정상"))
+    assert ok["verdict"] == "자동 승인 예상", ok["verdict"]
+    p, ref = simulate(customer("박당뇨"), {"Q4": [{"kcdCode": "E11.9", "diagnosedOn": "2024-01-01", "treatment": "MEDICATION",
+                                                 "treatmentDays": 300, "cured": False}]})
+    assert ref["verdict"] == "본사 이관 예상", ref["verdict"]
+    assert call("GET", f"/proposals/{p['id']}")["status"] == "ISSUED", "사전 실행이 설계서를 전환함"
+    return "자동 승인 예상 / 본사 이관 예상"
+
+
 if __name__ == "__main__":
     width = max(len(r[1]) for r in results)
     for status, name, note, sec in results:

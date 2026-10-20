@@ -638,8 +638,10 @@ async function apply(params) {
         <div class="details"></div>
         ${q.detailRequired ? '<button class="btn ghost sm add" hidden style="margin-top:8px">+ 상세 추가</button>' : ''}
       </div>`).join('')}
-      <div class="actions"><button class="btn" id="to-doc">청약서 확인</button></div>
-      <div class="error" id="err1" hidden></div></div>
+      <div class="actions"><button class="btn ghost" id="simulate">전산심사</button><button class="btn" id="to-doc">청약서 확인</button>
+        <span class="small muted">전산심사: 입력한 고지로 심사 결과를 미리 확인합니다 (저장 안 함)</span></div>
+      <div class="error" id="err1" hidden></div>
+      <div id="sim"></div></div>
   </div>
   <div id="step2"></div>`;
 
@@ -676,6 +678,18 @@ async function apply(params) {
     })),
   }));
 
+  $('simulate').onclick = async () => {
+    $('err1').hidden = true;
+    try {
+      const r = await post('/core/applications/underwrite-preview', { proposalId: p.id, questionnaireId: qn.id, answers: answers() });
+      const cls = r.verdict.startsWith('자동') ? 't-ok' : r.verdict.startsWith('본사') ? 't-info' : r.verdict.startsWith('거절') ? 't-bad' : 't-warn';
+      $('sim').innerHTML = `<h2 style="margin-top:16px">전산심사 결과 ${tag(r.verdict, cls)} <span class="small muted">룰셋 v${r.ruleSetVersion} · 저장되지 않은 사전 결과</span></h2>
+        ${table(['담보', '결과', '조건', '적용 룰', '사유'], r.coverages.map((x) => `
+          <tr><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome)}</td>
+          <td class="small">${exclusionText(x.exclusions)}${x.ratingPct ? `할증 ${x.ratingPct}%` : ''}</td>
+          <td>${rules(x.matchedRules)}</td><td class="small">${x.reasons.map(esc).join('<br>')}</td></tr>`))}`;
+    } catch (e) { showError($('err1'), e); }
+  };
   $('to-doc').onclick = async () => {
     $('err1').hidden = true;
     try {

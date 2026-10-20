@@ -13,6 +13,7 @@ import com.ax.core.proposal.ProposalCoverage;
 import com.ax.core.proposal.ProposalRepository;
 import com.ax.core.uw.UwCase;
 import com.ax.core.uw.UwService;
+import com.ax.core.uw.engine.UwResult;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -62,6 +63,12 @@ public class ApplicationService {
     @Transactional(readOnly = true)
     public Draft preview(Long proposalId, Long questionnaireId, List<AnswerInput> answers) {
         return draft(proposalId, questionnaireId, answers, LocalDateTime.now());
+    }
+
+    /** 전산심사 사전 실행: 고지까지 입력된 청약 초안으로 심사 결과를 미리 본다 (저장 안 함) */
+    @Transactional(readOnly = true)
+    public UwResult simulate(Long proposalId, Long questionnaireId, List<AnswerInput> answers) {
+        return uwService.simulate(draft(proposalId, questionnaireId, answers, LocalDateTime.now()).application());
     }
 
     /** 서명 후 제출: 서명 검증 → 저장 → 설계서 전환 → 전산심사 */
@@ -179,6 +186,11 @@ public class ApplicationService {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public Proposal proposalOf(Long proposalId) {
+        return proposalRepository.findById(proposalId).orElseThrow(() -> new NotFoundException("설계서", proposalId));
     }
 
     @Transactional(readOnly = true)

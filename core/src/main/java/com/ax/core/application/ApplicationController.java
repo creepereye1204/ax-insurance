@@ -5,6 +5,7 @@ import com.ax.core.application.ApplicationService.Signature;
 import com.ax.core.contract.ContractRepository;
 import com.ax.core.uw.UwCaseRepository;
 import com.ax.core.uw.UwController;
+import com.ax.core.uw.engine.Exclusion;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -102,6 +103,30 @@ public class ApplicationController {
     public Document preview(@Valid @RequestBody PreviewRequest req) {
         var draft = applicationService.preview(req.proposalId(), req.questionnaireId(), req.answers());
         return Document.of(draft.application(), draft.requiredAgreements(), draft.documentHash());
+    }
+
+    public record SimulatedCoverage(String coverageName, String category, String outcome, String outcomeLabel,
+                                    List<Exclusion> exclusions, int ratingPct,
+                                    List<String> matchedRules, List<String> reasons) {
+    }
+
+    /** verdict: 제출 시 예상 처리 (자동 승인 / 본사 이관 / 연기 / 거절) */
+    public record Simulation(int ruleSetVersion, String verdict, List<SimulatedCoverage> coverages) {
+    }
+
+    @PostMapping("/underwrite-preview")
+    @Transactional(readOnly = true)
+    public Simulation underwritePreview(@Valid @RequestBody PreviewRequest req) {
+        var result = applicationService.simulate(req.proposalId(), req.questionnaireId(), req.answers());
+        var proposal = applicationService.proposalOf(req.proposalId());
+        List<SimulatedCoverage> lines = proposal.getCoverages().stream().map(pc -> {
+            var d = result.decisions().get(pc.getCoverage().getCategory());
+            return new SimulatedCoverage(pc.getCoverage().getName(), pc.getCoverage().getCategory().getLabel(),
+                    d.outcome().name(), d.outcome().getLabel(), d.exclusions(), d.ratingPct(), d.matchedRules(), d.reasons());
+        }).toList();
+        String verdict = result.anyReferred() ? "본사 이관 예상" : result.anyPostponed() ? "연기 예상"
+                : result.allDeclined() ? "거절 예상" : "자동 승인 예상";
+        return new Simulation(result.ruleSetVersion(), verdict, lines);
     }
 
     @PostMapping

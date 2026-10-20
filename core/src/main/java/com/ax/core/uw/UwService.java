@@ -92,6 +92,15 @@ public class UwService {
         return uwCase;
     }
 
+    /** 전산심사 사전 실행: 저장하지 않고 룰 엔진 결과만 돌려준다 (청약 제출 전 확인용) */
+    @Transactional(readOnly = true)
+    public UwResult simulate(Application app) {
+        UwRuleSet ruleSet = activeRuleSet();
+        List<CoverageCategory> categories = app.getCoverages().stream()
+                .map(c -> c.getCoverage().getCategory()).distinct().toList();
+        return ruleEngine.evaluate(ruleSet.getVersion(), ruleSet.getRules(), inputFactory.forApplication(app, categories));
+    }
+
     // ---------------------------------------------------------------- 본사심사
 
     public enum ManualChoice { ACCEPT_PROPOSED, ACCEPT_STANDARD, DECLINE }
