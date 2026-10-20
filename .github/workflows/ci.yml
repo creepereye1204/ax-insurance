@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# PR 에서는 읽기 권한만 (공개 레포)
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-test:
+    name: 기간계 단위 테스트
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test --no-daemon
+      - name: 테스트 리포트
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: core/build/reports/tests/test
+
+  lint:
+    name: 정적 검사
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python 문법 검사
+        run: python -m compileall -q api/app scripts
+      - name: 화면 JS 문법 검사
+        run: node --check gateway/html/app.js
+      - name: docker compose 설정 검증
+        run: |
+          docker network create llm_default
+          cp .env.example .env
+          docker compose config -q
+
+  scenario-test:
+    name: 업무 시나리오 테스트 (DB + 기간계)
+    needs: unit-test
+    runs-on: ubuntu-latest
+    env:
+      # CI 에서는 대량 데이터를 줄여서 생성
+      AX_SEED_CUSTOMERS: '3000'
+      AX_SEED_EXTERNAL: '2000'
+      AX_SEED_CONTRACTS: '3000'
+      AX_SEED_CLAIMS: '20000'
+    steps:
+      - uses: actions/checkout@v4
+      - name: 환경 준비
+        run: |
+          docker network create llm_default   # 운영 서버의 Ollama 네트워크 대체 (AI 서비스는 CI 에서 띄우지 않음)
+          cp .env.example .env
+      - name: DB + 기간계 기동
+        run: docker compose up -d --build db core-a
+      - name: readiness 대기 (데이터 적재 포함)
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fs localhost:8031/actuator/health/readiness > /dev/null; then echo ready; exit 0; fi
+            sleep 3
+          done
+          docker compose logs core-a | tail -100
+          exit 1
+      - name: 시나리오 14개 실행
+        run: python3 scripts/scenarios.py http://localhost:8031
+      - name: 실패 시 로그
+        if: failure()
+        run: docker compose logs core-a | tail -200

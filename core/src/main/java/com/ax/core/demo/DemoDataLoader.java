@@ -53,6 +53,7 @@ import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
@@ -86,10 +87,13 @@ public class DemoDataLoader implements ApplicationRunner {
     private final JdbcTemplate jdbc;
     private final EntityManager em;
 
+    @Value("${ax.demo.enabled:true}")
+    private boolean enabled;
+
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        if (productRepository.existsByCode(ProductCatalog.SAMPLE_CODE)) {
+        if (!enabled || productRepository.existsByCode(ProductCatalog.SAMPLE_CODE)) {
             return;
         }
         long started = System.currentTimeMillis();

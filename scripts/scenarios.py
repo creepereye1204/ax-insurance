@@ -25,15 +25,22 @@ class ApiError(Exception):
         self.status, self.detail = status, detail
 
 
-def call(method, path, body=None):
+def call(method, path, body=None, retries=5):
     req = urllib.request.Request(BASE + path, method=method, headers={"content-type": "application/json"},
                                  data=None if body is None else json.dumps(body).encode())
     try:
         with urllib.request.urlopen(req, timeout=60) as res:
             return json.loads(res.read() or "null")
     except urllib.error.HTTPError as e:
-        payload = json.loads(e.read() or "{}")
-        raise ApiError(e.code, payload.get("detail", payload)) from None
+        raw = e.read()
+        if e.code == 429 and retries > 0:  # 게이트웨이 요청 제한: 잠시 쉬고 재시도
+            time.sleep(1.5)
+            return call(method, path, body, retries - 1)
+        try:
+            payload = json.loads(raw or b"{}")
+        except json.JSONDecodeError:
+            payload = {"detail": raw[:200].decode(errors="replace")}
+        raise ApiError(e.code, payload.get("detail", payload) if isinstance(payload, dict) else payload) from None
 
 
 def customer(name):

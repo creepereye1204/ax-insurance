@@ -198,6 +198,18 @@ async function route() {
 }
 window.addEventListener('hashchange', route);
 
+/** 운영 상태: 응답한 기간계 인스턴스(로드밸런싱)와 AI 서킷브레이커 상태 */
+async function refreshOps() {
+  try {
+    const s = await api('/core/ops/status');
+    const c = s.aiCircuit.state;
+    const cls = c === 'CLOSED' ? 't-ok' : c === 'OPEN' ? 't-bad' : 't-warn';
+    $('ops').innerHTML = `기간계 <b>${esc(s.instance)}</b> · AI 서킷 ${tag(c, cls)}`;
+  } catch { $('ops').textContent = ''; }
+}
+window.addEventListener('hashchange', refreshOps);
+refreshOps();
+
 // ============================================================ 개요
 async function home() {
   const view = activeView;

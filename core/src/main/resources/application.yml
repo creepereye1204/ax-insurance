@@ -16,16 +16,59 @@ spring:
   threads:
     virtual:
       enabled: true
+  lifecycle:
+    # 롤링 배포 시 처리 중인 요청을 마치고 종료
+    timeout-per-shutdown-phase: 30s
+
+server:
+  shutdown: graceful
+
+# AI 서비스 호출 서킷브레이커: 최근 10건 중 50% 이상 실패(또는 2분 초과 지연)하면 30초간 호출을 차단하고
+# 즉시 수동심사로 넘긴다. 30초 뒤 2건을 시험 호출해 회복 여부를 판단한다.
+resilience4j:
+  circuitbreaker:
+    instances:
+      ai:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 120s
+        slow-call-rate-threshold: 80
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 2
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+        # AI 장애로 서킷이 열려도 기간계 헬스는 UP 유지 (로드밸런서가 정상 인스턴스를 빼지 않도록)
+        allow-health-indicator-to-fail: false
 
 ax:
+  instance: ${HOSTNAME:local}
   ai:
     base-url: ${AI_BASE_URL:http://localhost:8030}
     connect-timeout: 3s
     # 로컬 LLM 은 콜드 스타트 시 1분 이상 걸릴 수 있음
     read-timeout: 180s
+  demo:
+    # 여러 인스턴스가 동시에 뜰 때 데모 데이터는 한 인스턴스만 적재
+    enabled: ${AX_DEMO_ENABLED:true}
+  seed:
+    enabled: ${AX_SEED_ENABLED:true}
+    customers: ${AX_SEED_CUSTOMERS:30000}
+    external-records: ${AX_SEED_EXTERNAL:50000}
+    contracts: ${AX_SEED_CONTRACTS:60000}
+    claims: ${AX_SEED_CLAIMS:500000}
 
 management:
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,circuitbreakers,circuitbreakerevents
