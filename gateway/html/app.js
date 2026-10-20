@@ -139,7 +139,7 @@ async function productPicker(el, selectedId, onChange) {
     const page = await api(`/core/products?size=100${type ? '&type=' + type : ''}&q=${encodeURIComponent(q)}`);
     list.innerHTML = page.content.map((p) => `<div class="item ${String(p.id) === String(selectedId) ? 'on' : ''}" data-id="${p.id}">
       <b>${esc(p.name)}</b> ${p.simplifiedUw ? tag('간편심사', 't-warn') : ''}
-      <div class="small muted">${esc(p.typeLabel)} · 만 ${p.minEntryAge}~${p.maxEntryAge}세 · ${p.paymentTerms.map((t) => (t === 1 ? '1년갱신' : t + '년납')).join('/')} · ${esc(p.insurancePeriod)} · ${esc(p.code)}</div></div>`).join('')
+      <div class="small muted">${esc(p.typeLabel)} · 보험나이 ${p.minEntryAge}~${p.maxEntryAge}세 · ${p.paymentTerms.map((t) => (t === 1 ? '1년갱신' : t + '년납')).join('/')} · ${esc(p.insurancePeriod)} · ${esc(p.code)}</div></div>`).join('')
       || '<div class="empty">조건에 맞는 판매 중 상품이 없습니다.</div>';
     list.querySelectorAll('.item').forEach((it) => (it.onclick = async () => {
       selectedId = it.dataset.id;
