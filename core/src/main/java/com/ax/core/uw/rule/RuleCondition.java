@@ -11,6 +11,7 @@ import java.util.List;
  * MEDICAL     : kcd(패턴 목록), withinMonths, treatments(선택), cured(선택)
  * CLAIM_COUNT : withinMonths, claimCount(이상)
  * AGE         : ageOver(초과)
+ * JOB_RISK    : jobRiskAtLeast(이상)
  * </pre>
  */
 public record RuleCondition(
@@ -21,21 +22,26 @@ public record RuleCondition(
         List<TreatmentType> treatments,
         Boolean cured,
         Integer claimCount,
-        Integer ageOver) {
+        Integer ageOver,
+        Integer jobRiskAtLeast) {
 
     public static RuleCondition answer(String questionCode) {
-        return new RuleCondition(ConditionSource.ANSWER, questionCode, null, null, null, null, null, null);
+        return new RuleCondition(ConditionSource.ANSWER, questionCode, null, null, null, null, null, null, null);
     }
 
     public static RuleCondition medical(List<String> kcd, int withinMonths, List<TreatmentType> treatments, Boolean cured) {
-        return new RuleCondition(ConditionSource.MEDICAL, null, kcd, withinMonths, treatments, cured, null, null);
+        return new RuleCondition(ConditionSource.MEDICAL, null, kcd, withinMonths, treatments, cured, null, null, null);
     }
 
     public static RuleCondition claimCount(int withinMonths, int count) {
-        return new RuleCondition(ConditionSource.CLAIM_COUNT, null, null, withinMonths, null, null, count, null);
+        return new RuleCondition(ConditionSource.CLAIM_COUNT, null, null, withinMonths, null, null, count, null, null);
     }
 
     public static RuleCondition ageOver(int age) {
-        return new RuleCondition(ConditionSource.AGE, null, null, null, null, null, null, age);
+        return new RuleCondition(ConditionSource.AGE, null, null, null, null, null, null, age, null);
+    }
+
+    public static RuleCondition jobRisk(int atLeast) {
+        return new RuleCondition(ConditionSource.JOB_RISK, null, null, null, null, null, null, null, atLeast);
     }
 }

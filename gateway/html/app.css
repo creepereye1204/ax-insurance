@@ -96,3 +96,38 @@ dl.kv dd { margin: 0; }
   .detail-row { grid-template-columns: 1fr 1fr; }
 }
 .nowrap { white-space: nowrap; }
+
+/* ---------- 검색형 선택기 ---------- */
+.picker { position: relative; }
+.picker .results { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; margin-top: 2px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; max-height: 300px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.picker .results div { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.picker .results div:hover { background: var(--soft); }
+.chosen { display: inline-flex; gap: 8px; align-items: center; background: var(--soft); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px; }
+.list-select { max-height: 340px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.list-select .item { padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.list-select .item:hover { background: var(--soft); }
+.list-select .item.on { background: var(--soft); border-left: 3px solid var(--accent); }
+
+/* ---------- 단계 표시 ---------- */
+.wizard { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+.wizard span { padding: 5px 12px; border-radius: 999px; background: var(--soft); color: var(--muted); font-size: 13px; }
+.wizard span.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.wizard span.done { color: var(--ink); }
+
+/* ---------- 문서(설계서·청약서) ---------- */
+.doc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px 28px; }
+.doc h2.title { text-align: center; font-size: 20px; margin-bottom: 4px; }
+.doc .docno { text-align: center; color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+.doc h3 { font-size: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 4px; margin: 18px 0 8px; }
+.big { font-size: 22px; font-weight: 700; }
+.light { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 4px; }
+.light.g { background: var(--ok); } .light.y { background: var(--warn); } .light.r { background: var(--bad); } .light.b { background: var(--info); }
+.hash { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; color: var(--muted); }
+@media print {
+  nav.side, .banner, .no-print { display: none !important; }
+  .layout { display: block; }
+  main { padding: 0; }
+  .doc { border: 0; }
+}

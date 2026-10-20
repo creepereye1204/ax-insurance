@@ -3,17 +3,30 @@ package com.ax.core.demo;
 import static com.ax.core.common.TreatmentType.INPATIENT;
 import static com.ax.core.common.TreatmentType.MEDICATION;
 import static com.ax.core.common.TreatmentType.OUTPATIENT;
+import static com.ax.core.product.CoverageCategory.ACCIDENT;
 import static com.ax.core.product.CoverageCategory.CANCER;
+import static com.ax.core.product.CoverageCategory.CI;
+import static com.ax.core.product.CoverageCategory.DEATH;
+import static com.ax.core.product.CoverageCategory.HOSPITAL;
 import static com.ax.core.product.CoverageCategory.MEDICAL;
 import static com.ax.core.product.CoverageCategory.SURGERY;
 
+import com.ax.core.application.Agreement;
 import com.ax.core.application.ApplicationService;
 import com.ax.core.application.ApplicationService.AnswerInput;
-import com.ax.core.application.ApplicationService.CoverageInput;
+import com.ax.core.application.ApplicationService.Signature;
+import com.ax.core.claim.Claim;
+import com.ax.core.claim.ClaimRepository;
+import com.ax.core.claim.ClaimType;
 import com.ax.core.common.TreatmentType;
+import com.ax.core.contract.Contract;
+import com.ax.core.contract.ContractCoverage;
+import com.ax.core.contract.ContractRepository;
+import com.ax.core.customer.ConsumerType;
 import com.ax.core.customer.Customer;
 import com.ax.core.customer.CustomerRepository;
 import com.ax.core.customer.Gender;
+import com.ax.core.customer.InvestmentProfile;
 import com.ax.core.disclosure.Questionnaire;
 import com.ax.core.disclosure.QuestionnaireController;
 import com.ax.core.disclosure.QuestionnaireRepository;
@@ -21,55 +34,97 @@ import com.ax.core.external.ExternalMedicalRecord;
 import com.ax.core.external.ExternalMedicalRecordRepository;
 import com.ax.core.kcd.Kcd;
 import com.ax.core.kcd.KcdRepository;
+import com.ax.core.product.Coverage;
+import com.ax.core.product.FundRepository;
 import com.ax.core.product.Product;
 import com.ax.core.product.ProductRepository;
+import com.ax.core.proposal.PremiumCalculator;
+import com.ax.core.proposal.Proposal;
+import com.ax.core.proposal.ProposalService;
 import com.ax.core.uw.rule.RuleCondition;
 import com.ax.core.uw.rule.RuleParams;
 import com.ax.core.uw.rule.UwAction;
 import com.ax.core.uw.rule.UwRule;
 import com.ax.core.uw.rule.UwRuleSet;
 import com.ax.core.uw.rule.UwRuleSetRepository;
+import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 데모 기준 데이터와 시나리오별 가상 고객. 심사 기준은 포트폴리오용 가상 기준이다.
- * 상품은 AI 서비스의 data/policies/샘플_실손의료비보험.txt 와 짝을 이룬다.
+ * 기준 데이터(질병코드·상품·펀드·요율·질문지·심사 룰)와 시나리오 고객. 모든 데이터는 가상이다.
+ * 시나리오 설명: docs/scenarios.md
  */
+@Slf4j
+@Order(1)
 @Component
 @RequiredArgsConstructor
 public class DemoDataLoader implements ApplicationRunner {
 
-    private static final String PRODUCT_CODE = "SAMPLE-MED-01";
     private static final String EXTERNAL = "타사A생명(Mock)";
 
     private final KcdRepository kcdRepository;
     private final ProductRepository productRepository;
+    private final FundRepository fundRepository;
     private final QuestionnaireRepository questionnaireRepository;
     private final UwRuleSetRepository ruleSetRepository;
     private final CustomerRepository customerRepository;
     private final ExternalMedicalRecordRepository externalRecords;
+    private final ContractRepository contractRepository;
+    private final ClaimRepository claimRepository;
+    private final ProposalService proposalService;
     private final ApplicationService applicationService;
+    private final JdbcTemplate jdbc;
+    private final EntityManager em;
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        if (productRepository.existsByCode(PRODUCT_CODE)) {
+        if (productRepository.existsByCode(ProductCatalog.SAMPLE_CODE)) {
             return;
         }
+        long started = System.currentTimeMillis();
         loadKcd();
-        Product product = productRepository.save(new Product(PRODUCT_CODE, "샘플 실손의료비보험", "샘플_실손의료비보험", 65)
-                .addCoverage("MED-01", "실손의료비", MEDICAL, 9_000)
-                .addCoverage("SUR-01", "질병수술비", SURGERY, 3_000)
-                .addCoverage("CAN-01", "암진단비", CANCER, 6_000));
+        fundRepository.saveAll(ProductCatalog.funds());
+        Product sample = productRepository.save(ProductCatalog.sample());
+        productRepository.saveAll(ProductCatalog.generate());
+        em.flush();
+        int rates = generatePremiumRates();
         Questionnaire questionnaire = questionnaireRepository.save(questionnaire());
         ruleSetRepository.save(ruleSet());
-        loadCustomers(product, questionnaire);
+        em.flush();
+        loadScenarioCustomers(sample, questionnaire);
+        log.info("기준 데이터 적재 완료: 상품 {}개, 요율 {}행 ({}ms)", productRepository.count(), rates,
+                System.currentTimeMillis() - started);
+    }
+
+    /** 요율표 생성: 담보 기초요율 × 나이 증가율 × 성별 × 납입기간 계수 */
+    private int generatePremiumRates() {
+        return jdbc.update("""
+                insert into premium_rate (coverage_id, gender, age, payment_term, rate_per10m)
+                select cv.id, g.gender, a.age, t.term::int,
+                       greatest(1, round(cv.base_rate_per10m
+                           * power(1 + cv.age_growth_permille / 1000.0, a.age - 30)
+                           * case when cv.category in ('CANCER', 'DENTAL')
+                                  then (case when g.gender = 'M' then 0.95 else 1.05 end)
+                                  else (case when g.gender = 'M' then 1.08 else 0.93 end) end
+                           * case when t.term::int <= 1 then 1 else power(20.0 / t.term::int, 0.85) end))
+                from coverage cv
+                join product p on p.id = cv.product_id
+                cross join (values ('M'), ('F')) g(gender)
+                cross join lateral generate_series(p.min_entry_age, p.max_entry_age) a(age)
+                cross join lateral jsonb_array_elements_text(p.payment_terms) t(term)
+                where cv.category not in ('ANNUITY', 'SAVINGS')
+                """);
     }
 
     private void loadKcd() {
@@ -83,8 +138,8 @@ public class DemoDataLoader implements ApplicationRunner {
                 {"S42.0", "쇄골 골절"}, {"S52.5", "요골 하단 골절"}, {"S82.2", "경골 골절"},
                 {"M51.2", "추간판 장애(디스크)"}, {"M17.9", "무릎관절증"}, {"H25.9", "노년 백내장"},
                 {"N20.0", "신장결석"}, {"D25.9", "자궁근종"}, {"L30.1", "한포진"}, {"B35.3", "발백선(무좀)"},
-                {"F32.9", "우울 에피소드"}, {"O80", "단일 자연분만"}, {"O82", "제왕절개에 의한 단일분만"},
-                {"Z00.0", "일반 건강검진"},
+                {"F32.9", "우울 에피소드"}, {"K02.9", "치아우식(충치)"}, {"O80", "단일 자연분만"},
+                {"O82", "제왕절개에 의한 단일분만"}, {"Z00.0", "일반 건강검진"},
         };
         for (String[] c : codes) {
             kcdRepository.save(new Kcd(c[0], c[1]));
@@ -105,56 +160,94 @@ public class DemoDataLoader implements ApplicationRunner {
         List<String> stomach = List.of("K25*", "K26*", "K29*");
         List<String> fracture = List.of("S42*", "S52*", "S82*");
         return new UwRuleSet(1, "데모 심사 기준 (가상)")
-                .add(new UwRule("R-AGE-01", "가입나이 초과", 10, RuleCondition.ageOver(65), List.of(),
-                        UwAction.DECLINE, RuleParams.reason("가입나이(만 65세) 초과")))
                 .add(new UwRule("R-RCT-01", "최근 입원·수술 치료 중", 20,
                         RuleCondition.medical(List.of("*"), 3, List.of(INPATIENT, TreatmentType.SURGERY), false), List.of(),
                         UwAction.POSTPONE, RuleParams.reason("최근 3개월 내 입원·수술 후 치료 중 — 치료 종결 후 재청약")))
-                .add(new UwRule("R-CA-01", "암 병력 — 암진단비", 30, RuleCondition.medical(List.of("C*"), 60, null, null),
-                        List.of(CANCER), UwAction.DECLINE, RuleParams.reason("5년 내 암 병력 — 암진단비 인수 불가")))
+                .add(new UwRule("R-CA-01", "암 병력 — 암진단", 30, RuleCondition.medical(List.of("C*"), 60, null, null),
+                        List.of(CANCER), UwAction.DECLINE, RuleParams.reason("5년 내 암 병력 — 암진단 담보 인수 불가")))
                 .add(new UwRule("R-CA-02", "암 병력 — 기타 담보", 31, RuleCondition.medical(List.of("C*"), 60, null, null),
-                        List.of(MEDICAL, SURGERY), UwAction.REFER, RuleParams.reason("5년 내 암 병력 — 본사 심사")))
+                        List.of(DEATH, MEDICAL, SURGERY, HOSPITAL, CI), UwAction.REFER, RuleParams.reason("5년 내 암 병력 — 본사 심사")))
                 .add(new UwRule("R-DM-01", "당뇨 치료 이력", 40,
                         RuleCondition.medical(diabetes, 60, List.of(MEDICATION, INPATIENT), null), List.of(),
                         UwAction.REFER, RuleParams.reason("당뇨 치료 이력 — 합병증·혈당 관리 상태 확인 필요")))
                 .add(new UwRule("R-ADD-01", "추가검사 이력", 45, RuleCondition.answer("Q2"), List.of(),
                         UwAction.REFER, RuleParams.reason("1년 내 추가검사(재검사) — 검사 결과 확인 필요")))
                 .add(new UwRule("R-HT-01", "고혈압 투약", 50,
-                        RuleCondition.medical(List.of("I10*"), 60, List.of(MEDICATION, OUTPATIENT), null), List.of(SURGERY),
-                        UwAction.RATING, RuleParams.rating("고혈압 투약 — 질병수술비 할증", 20)))
+                        RuleCondition.medical(List.of("I10*"), 60, List.of(MEDICATION, OUTPATIENT), null), List.of(SURGERY, CI),
+                        UwAction.RATING, RuleParams.rating("고혈압 투약 — 수술비·뇌심장 진단 할증", 20)))
                 .add(new UwRule("R-GI-01", "위·십이지장 질환 치료 중", 60,
-                        RuleCondition.medical(stomach, 12, null, false), List.of(MEDICAL, SURGERY), UwAction.EXCLUSION,
+                        RuleCondition.medical(stomach, 12, null, false), List.of(MEDICAL, SURGERY, HOSPITAL), UwAction.EXCLUSION,
                         RuleParams.exclusion("1년 내 위·십이지장 질환 치료 중", "위·십이지장", stomach, 24)))
                 .add(new UwRule("R-GI-02", "위염 완치", 61,
                         RuleCondition.medical(List.of("K29*"), 60, null, true), List.of(),
                         UwAction.STANDARD, RuleParams.reason("위염 완치 — 표준체")))
                 .add(new UwRule("R-FX-01", "골절 치료 중", 70,
-                        RuleCondition.medical(fracture, 12, null, false), List.of(MEDICAL, SURGERY), UwAction.EXCLUSION,
-                        RuleParams.exclusion("1년 내 골절 치료 중", "골절 부위", fracture, 12)))
-                .add(new UwRule("R-PRG-01", "임신 중", 80, RuleCondition.answer("Q5"), List.of(MEDICAL),
+                        RuleCondition.medical(fracture, 12, null, false), List.of(MEDICAL, SURGERY, HOSPITAL, ACCIDENT),
+                        UwAction.EXCLUSION, RuleParams.exclusion("1년 내 골절 치료 중", "골절 부위", fracture, 12)))
+                .add(new UwRule("R-PRG-01", "임신 중", 80, RuleCondition.answer("Q5"), List.of(MEDICAL, SURGERY, HOSPITAL),
                         UwAction.EXCLUSION, RuleParams.exclusion("임신 중", "임신·출산", List.of("O*"), 12)))
-                .add(new UwRule("R-CLM-01", "잦은 보험금 청구", 90, RuleCondition.claimCount(12, 3), List.of(MEDICAL),
-                        UwAction.REFER, RuleParams.reason("최근 1년 보험금 청구 3회 이상")));
+                .add(new UwRule("R-CLM-01", "잦은 보험금 청구", 90, RuleCondition.claimCount(12, 3), List.of(MEDICAL, HOSPITAL),
+                        UwAction.REFER, RuleParams.reason("최근 1년 보험금 청구 3회 이상")))
+                .add(new UwRule("R-JOB-01", "고위험 직업", 95, RuleCondition.jobRisk(3), List.of(ACCIDENT, DEATH),
+                        UwAction.RATING, RuleParams.rating("고위험 직업(3등급) — 상해·사망 할증", 50)));
     }
 
-    private void loadCustomers(Product product, Questionnaire questionnaire) {
-        Customer demo = customerRepository.save(new Customer("데모고객", LocalDate.of(1998, 1, 1), Gender.M, "010-1234-5678"));
-        customerRepository.save(new Customer("김정상", LocalDate.of(1995, 4, 12), Gender.F, "010-2222-1001"));
-        Customer gastritis = customerRepository.save(new Customer("이위염", LocalDate.of(1990, 8, 3), Gender.M, "010-2222-1002"));
-        Customer diabetes = customerRepository.save(new Customer("박당뇨", LocalDate.of(1975, 11, 20), Gender.M, "010-2222-1003"));
-        customerRepository.save(new Customer("최고령", LocalDate.of(1955, 2, 14), Gender.F, "010-2222-1004"));
-        Customer fracture = customerRepository.save(new Customer("한골절", LocalDate.of(2000, 6, 30), Gender.M, "010-2222-1005"));
+    // ------------------------------------------------------------------ 시나리오 고객 (docs/scenarios.md)
 
+    private Customer customer(String name, LocalDate birth, Gender g, String phone, ConsumerType type, String job, int risk,
+                              InvestmentProfile profile) {
+        Customer c = new Customer(name, birth, g, phone, type, job, risk);
+        if (profile != null) {
+            c.assessInvestmentProfile(profile);
+        }
+        return customerRepository.save(c);
+    }
+
+    private void loadScenarioCustomers(Product sample, Questionnaire questionnaire) {
         LocalDate today = LocalDate.now();
+        ConsumerType gen = ConsumerType.GENERAL;
+        Customer demo = customer("데모고객", LocalDate.of(1998, 1, 1), Gender.M, "010-1234-5678", gen, "회사원(사무직)", 1, null);
+        customer("김정상", LocalDate.of(1995, 4, 12), Gender.F, "010-2222-1001", gen, "회사원(사무직)", 1, InvestmentProfile.NEUTRAL);
+        Customer gastritis = customer("이위염", LocalDate.of(1990, 8, 3), Gender.M, "010-2222-1002", gen, "영업직", 1, null);
+        Customer diabetes = customer("박당뇨", LocalDate.of(1975, 11, 20), Gender.M, "010-2222-1003", gen, "자영업", 1, null);
+        customer("최고령", LocalDate.of(1955, 2, 14), Gender.F, "010-2222-1004", gen, "주부", 1, null);
+        Customer fracture = customer("한골절", LocalDate.of(2000, 6, 30), Gender.M, "010-2222-1005", gen, "대학생", 1, null);
+        customer("정전문", LocalDate.of(1980, 3, 2), Gender.M, "010-2222-1006", ConsumerType.PROFESSIONAL, "금융투자업 종사자", 1, null);
+        customer("오안정", LocalDate.of(1985, 9, 9), Gender.F, "010-2222-1007", gen, "교사", 1, InvestmentProfile.STABLE);
+        customer("강공격", LocalDate.of(1992, 12, 1), Gender.M, "010-2222-1008", gen, "IT 개발자", 1, InvestmentProfile.AGGRESSIVE);
+        customer("윤위험", LocalDate.of(1988, 5, 5), Gender.M, "010-2222-1009", gen, "건설현장 근로자", 3, null);
+        customer("서임신", LocalDate.of(1993, 7, 7), Gender.F, "010-2222-1010", gen, "디자이너", 1, null);
+        Customer frequent = customer("문다청구", LocalDate.of(1982, 2, 28), Gender.F, "010-2222-1011", gen, "간호사", 2, null);
+        customer("유어린", today.minusYears(10).withDayOfYear(1), Gender.M, "010-2222-1012", gen, "학생", 1, null);
+
         externalRecords.save(new ExternalMedicalRecord(gastritis, EXTERNAL, "K29.7", today.minusMonths(5), OUTPATIENT, false));
         externalRecords.save(new ExternalMedicalRecord(diabetes, EXTERNAL, "E11.9", today.minusYears(3), MEDICATION, false));
         externalRecords.save(new ExternalMedicalRecord(fracture, EXTERNAL, "S82.2", today.minusMonths(6), TreatmentType.SURGERY, false));
 
-        // 데모고객은 고지 사항 없이 청약 → 자동 승인 → 계약 성립 (청구 데모용 계약)
+        // 문다청구: 2년 전 가입한 기존 실손 계약에 최근 1년 청구 4건 → 새 실손 청약 시 R-CLM-01 본사 이관
+        Contract legacy = new Contract("LG-SCENARIO-01", frequent, sample, null, 20, today.minusYears(2), today.plusYears(18));
+        Coverage medical = sample.getCoverages().get(0);
+        legacy.addCoverage(new ContractCoverage(medical, medical.getDefaultAmount(), 12_000, 0, List.of()));
+        contractRepository.save(legacy);
+        String[][] claims = {{"J20.9", "급성 기관지염 외래"}, {"A09", "장염 외래"}, {"M51.2", "디스크 물리치료"}, {"J00", "감기 외래"}};
+        for (int i = 0; i < claims.length; i++) {
+            Claim c = new Claim("CL-SCENARIO-0" + (i + 1), legacy, ClaimType.OUTPATIENT, today.minusMonths(2 + i * 2),
+                    claims[i][1], claims[i][0], 60_000);
+            c.attachCheckNotes(List.of());
+            c.startAiReview();
+            c.completeAiReview("이관 데이터", null);
+            c.approve(50_000, "기존 지급 건");
+            claimRepository.save(c);
+        }
+
+        // 데모고객: 설계 → 청약(고지 없음) → 자동 승인 → 계약 성립 (청구 데모용)
+        List<PremiumCalculator.CoverageAmount> amounts = new ArrayList<>();
+        sample.getCoverages().forEach(cv -> amounts.add(new PremiumCalculator.CoverageAmount(cv.getId(), cv.getDefaultAmount())));
+        Proposal proposal = proposalService.issue(demo.getId(), sample.getId(),
+                new PremiumCalculator.Input(20, amounts, null, null, null, false));
         List<AnswerInput> allNo = questionnaire.getQuestions().stream()
                 .map(q -> new AnswerInput(q.getId(), false, List.of())).toList();
-        List<CoverageInput> coverages = product.getCoverages().stream()
-                .map(c -> new CoverageInput(c.getId(), 30_000_000)).toList();
-        applicationService.submit(demo.getId(), product.getId(), questionnaire.getId(), coverages, allNo);
+        applicationService.submit(proposal.getId(), questionnaire.getId(), allNo,
+                new Signature(demo.getName(), List.of(Agreement.values())));
     }
 }

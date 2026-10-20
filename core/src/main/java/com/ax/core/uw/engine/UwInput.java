@@ -13,6 +13,7 @@ import java.util.Map;
 public record UwInput(
         LocalDate asOf,
         int age,
+        int jobRiskGrade,
         Map<String, Boolean> answers,
         List<MedicalRecord> records,
         List<LocalDate> claimDates,

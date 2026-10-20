@@ -25,7 +25,6 @@ import com.ax.core.uw.rule.UwRuleSetRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -57,13 +56,14 @@ public class UwService {
     public UwCase autoUnderwrite(Application app) {
         UwRuleSet ruleSet = activeRuleSet();
         List<CoverageCategory> categories = app.getCoverages().stream()
-                .map(c -> c.getCoverage().getCategory()).toList();
+                .map(c -> c.getCoverage().getCategory()).distinct().toList();
         UwResult result = ruleEngine.evaluate(ruleSet.getVersion(), ruleSet.getRules(),
                 inputFactory.forApplication(app, categories));
 
         UwCase uwCase = new UwCase(app.getCustomer(), app.getProduct(), app, UwStage.AUTO_UW, ruleSet.getVersion());
         for (ApplicationCoverage ac : app.getCoverages()) {
-            uwCase.addResult(toResult(ac.getCoverage(), ac.getInsuredAmount(), result.decisions().get(ac.getCoverage().getCategory())));
+            uwCase.addResult(toResult(ac.getCoverage(), ac.getInsuredAmount(), ac.getBasePremium(),
+                    result.decisions().get(ac.getCoverage().getCategory())));
         }
 
         String summary;
@@ -149,14 +149,14 @@ public class UwService {
 
         UwRuleSet ruleSet = activeRuleSet();
         List<MedicalRecord> history = inputFactory.historyOf(customer);
-        List<CoverageCategory> categories = product.getCoverages().stream().map(Coverage::getCategory).toList();
+        List<CoverageCategory> categories = product.getCoverages().stream().map(Coverage::getCategory).distinct().toList();
         UwResult result = ruleEngine.evaluate(ruleSet.getVersion(), ruleSet.getRules(),
                 inputFactory.forPreUw(customer, history, categories));
 
         UwCase uwCase = new UwCase(customer, product, null, UwStage.PRE_UW, ruleSet.getVersion());
-        Map<CoverageCategory, Coverage> byCategory = product.getCoverages().stream()
-                .collect(Collectors.toMap(Coverage::getCategory, Function.identity()));
-        result.decisions().forEach((category, d) -> uwCase.addResult(toResult(byCategory.get(category), 0, d)));
+        for (Coverage coverage : product.getCoverages()) {
+            uwCase.addResult(toResult(coverage, coverage.getDefaultAmount(), 0, result.decisions().get(coverage.getCategory())));
+        }
         uwCase.log(new UwDecisionLog(UwStage.PRE_UW, "SYSTEM", "예상 결과 산출", result.matchedRules(),
                 "조회 이력 " + history.size() + "건, 고지 전 예상이므로 청약 후 전산심사에서 확정"));
         caseRepository.save(uwCase);
@@ -176,8 +176,8 @@ public class UwService {
                 .orElseThrow(() -> new IllegalStateException("활성화된 심사 룰셋이 없습니다."));
     }
 
-    private static UwCoverageResult toResult(Coverage coverage, long amount, CoverageDecision d) {
-        return new UwCoverageResult(coverage, amount, d.outcome(), d.exclusions(), d.ratingPct(),
+    private static UwCoverageResult toResult(Coverage coverage, long amount, long basePremium, CoverageDecision d) {
+        return new UwCoverageResult(coverage, amount, basePremium, d.outcome(), d.exclusions(), d.ratingPct(),
                 d.matchedRules(), d.reasons());
     }
 

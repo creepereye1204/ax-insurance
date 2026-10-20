@@ -2,6 +2,7 @@ package com.ax.core.claim;
 
 import com.ax.core.ai.AiReviewClient;
 import com.ax.core.ai.AiReviewException;
+import com.ax.core.product.Product;
 import java.text.NumberFormat;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +53,12 @@ public class ClaimAiReviewer {
         }
     }
 
+    /** 약관이 AI 서비스에 등록되지 않은 상품은 그 사실을 알려 근거 없는 단정을 막는다 */
+    public static String policyOf(Product product) {
+        return product.getPolicyDocument() != null ? product.getPolicyDocument()
+                : product.getName() + " (약관 미등록 — 등록된 약관이 없으면 일반 원칙으로 답하고 근거가 없음을 밝힐 것)";
+    }
+
     static String buildQuestion(Claim claim) {
         String amount = NumberFormat.getIntegerInstance().format(claim.getClaimedAmount());
         return """
@@ -64,7 +71,7 @@ public class ClaimAiReviewer {
                 - 시스템 점검 결과: %s
                 보장 대상 여부, 면책 사유 해당 여부, 예상 지급액(계산 과정 포함)을 약관 조항을 근거로 알려주세요.
                 시스템 점검 결과에 부담보나 고지의무 위반 의심이 있으면 심사 시 유의사항으로 함께 정리해 주세요."""
-                .formatted(claim.getContract().getProduct().getPolicyDocument(), claim.getType().getLabel(),
+                .formatted(policyOf(claim.getContract().getProduct()), claim.getType().getLabel(),
                         claim.getTreatmentDate(), claim.getDiagnosis(),
                         claim.getKcdCode() == null ? "미입력" : claim.getKcdCode(), amount,
                         claim.getCheckNotes() == null || claim.getCheckNotes().isEmpty()

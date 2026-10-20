@@ -5,18 +5,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ax.core.common.BusinessException;
 import com.ax.core.contract.Contract;
+import com.ax.core.customer.ConsumerType;
 import com.ax.core.customer.Customer;
 import com.ax.core.customer.Gender;
 import com.ax.core.product.Product;
+import com.ax.core.product.ProductType;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ClaimTest {
 
     static Contract contract() {
-        return new Contract("CT1", new Customer("홍길동", LocalDate.of(1995, 1, 1), Gender.M, null),
-                new Product("P1", "샘플 실손", "샘플_실손의료비보험", 65), null,
-                LocalDate.of(2026, 1, 1), LocalDate.of(2030, 12, 31));
+        Customer customer = new Customer("홍길동", LocalDate.of(1995, 1, 1), Gender.M, null,
+                ConsumerType.GENERAL, "회사원", 1);
+        Product product = Product.builder().code("P1").name("샘플 실손").type(ProductType.MEDICAL)
+                .policyDocument("샘플_실손의료비보험").minEntryAge(0).maxEntryAge(70).paymentTerms(List.of(20))
+                .insurancePeriod("20년만기").launchedOn(LocalDate.of(2026, 1, 1)).build();
+        return new Contract("CT1", customer, product, null, 20, LocalDate.of(2026, 1, 1), LocalDate.of(2030, 12, 31));
     }
 
     static Claim claim(long amount) {

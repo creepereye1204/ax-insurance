@@ -7,9 +7,13 @@ import com.ax.core.common.NotFoundException;
 import com.ax.core.contract.ContractController;
 import com.ax.core.contract.ContractRepository;
 import com.ax.core.external.ExternalMedicalRecordRepository;
+import com.ax.core.proposal.ProposalController;
+import com.ax.core.proposal.ProposalRepository;
 import com.ax.core.uw.UwCaseRepository;
 import com.ax.core.uw.UwStage;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Past;
@@ -46,25 +50,40 @@ public class CustomerController {
     private final ClaimRepository claimRepository;
     private final UwCaseRepository uwCaseRepository;
     private final ExternalMedicalRecordRepository externalRecords;
+    private final ProposalRepository proposalRepository;
 
     private static final String PHONE = "^01[016789]-\\d{3,4}-\\d{4}$";
 
     public record CreateRequest(@NotBlank @Size(max = 50) String name, @NotNull @Past LocalDate birthDate,
-                                @NotNull Gender gender, @Pattern(regexp = PHONE, message = "010-0000-0000 형식") String phone) {
+                                @NotNull Gender gender, @Pattern(regexp = PHONE, message = "010-0000-0000 형식") String phone,
+                                @NotNull ConsumerType consumerType, @NotBlank @Size(max = 50) String occupation,
+                                @Min(1) @Max(3) int jobRiskGrade) {
     }
 
     public record UpdateRequest(@NotBlank @Size(max = 50) String name,
-                                @Pattern(regexp = PHONE, message = "010-0000-0000 형식") String phone) {
+                                @Pattern(regexp = PHONE, message = "010-0000-0000 형식") String phone,
+                                @NotNull ConsumerType consumerType, @NotBlank @Size(max = 50) String occupation,
+                                @Min(1) @Max(3) int jobRiskGrade) {
+    }
+
+    /** 투자성향 진단: 5문항 각 1~5점 */
+    public record ProfileRequest(@NotNull @Size(min = 5, max = 5) List<@Min(1) @Max(5) Integer> scores) {
     }
 
     public record ConsentRequest(@NotNull ConsentType type) {
     }
 
     public record Response(Long id, String name, LocalDate birthDate, int age, Gender gender, String phone,
-                           LocalDateTime createdAt) {
+                           ConsumerType consumerType, String consumerTypeLabel, String occupation, int jobRiskGrade,
+                           InvestmentProfile investmentProfile, String investmentProfileLabel, LocalDateTime profiledAt,
+                           boolean protectedSenior, LocalDateTime createdAt) {
         static Response from(Customer c) {
-            return new Response(c.getId(), c.getName(), c.getBirthDate(), c.ageAt(LocalDate.now()), c.getGender(),
-                    c.getPhone(), c.getCreatedAt());
+            LocalDate today = LocalDate.now();
+            return new Response(c.getId(), c.getName(), c.getBirthDate(), c.ageAt(today), c.getGender(),
+                    c.getPhone(), c.getConsumerType(), c.getConsumerType().getLabel(), c.getOccupation(),
+                    c.getJobRiskGrade(), c.getInvestmentProfile(),
+                    c.getInvestmentProfile() == null ? null : c.getInvestmentProfile().getLabel(), c.getProfiledAt(),
+                    c.isProtectedSenior(today), c.getCreatedAt());
         }
     }
 
@@ -90,6 +109,7 @@ public class CustomerController {
     }
 
     public record Detail(Response customer, List<ConsentResponse> consents,
+                         List<ProposalController.Summary> proposals,
                          List<ContractController.Response> contracts,
                          List<ApplicationController.Summary> applications,
                          List<ClaimSummary> claims, List<PreUwSummary> preUwCases,
@@ -107,15 +127,23 @@ public class CustomerController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public Response create(@Valid @RequestBody CreateRequest req) {
-        return Response.from(customerRepository.save(
-                new Customer(req.name().trim(), req.birthDate(), req.gender(), req.phone())));
+        return Response.from(customerRepository.save(new Customer(req.name().trim(), req.birthDate(), req.gender(),
+                req.phone(), req.consumerType(), req.occupation().trim(), req.jobRiskGrade())));
     }
 
     @PutMapping("/{id}")
     @Transactional
     public Response update(@PathVariable Long id, @Valid @RequestBody UpdateRequest req) {
         Customer c = find(id);
-        c.update(req.name().trim(), req.phone());
+        c.update(req.name().trim(), req.phone(), req.occupation().trim(), req.jobRiskGrade(), req.consumerType());
+        return Response.from(c);
+    }
+
+    @PostMapping("/{id}/investment-profile")
+    @Transactional
+    public Response assessProfile(@PathVariable Long id, @Valid @RequestBody ProfileRequest req) {
+        Customer c = find(id);
+        c.assessInvestmentProfile(InvestmentProfile.fromScore(req.scores().stream().mapToInt(Integer::intValue).sum()));
         return Response.from(c);
     }
 
@@ -127,6 +155,7 @@ public class CustomerController {
         return new Detail(
                 Response.from(c),
                 consentRepository.findByCustomerIdOrderByIdDesc(id).stream().map(ConsentResponse::from).toList(),
+                proposalRepository.findByCustomerIdOrderByIdDesc(id).stream().map(ProposalController.Summary::from).toList(),
                 contractRepository.findByCustomerIdOrderByIdDesc(id).stream().map(ContractController.Response::from).toList(),
                 applicationRepository.findByCustomerIdOrderByIdDesc(id).stream().map(ApplicationController.Summary::from).toList(),
                 claimRepository.findByContractCustomerIdOrderByIdDesc(id).stream()

@@ -9,5 +9,7 @@ public enum ConditionSource {
     /** 내부 보험금 청구 횟수 */
     CLAIM_COUNT,
     /** 피보험자 나이 */
-    AGE
+    AGE,
+    /** 직업 위험등급 */
+    JOB_RISK
 }

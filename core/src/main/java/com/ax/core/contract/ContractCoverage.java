@@ -50,12 +50,14 @@ public class ContractCoverage {
     @Column(nullable = false)
     private long monthlyPremium;
 
-    public ContractCoverage(Coverage coverage, long insuredAmount, int ratingPct, List<ContractExclusion> exclusions) {
+    /** basePremium(표준체 보험료)에 할증률을 반영해 성립한다 */
+    public ContractCoverage(Coverage coverage, long insuredAmount, long basePremium, int ratingPct,
+                            List<ContractExclusion> exclusions) {
         this.coverage = coverage;
         this.insuredAmount = insuredAmount;
         this.ratingPct = ratingPct;
         this.exclusions = exclusions;
-        this.monthlyPremium = coverage.monthlyPremium(insuredAmount, ratingPct);
+        this.monthlyPremium = Math.round(basePremium * (100 + ratingPct) / 100.0 / 10) * 10;
     }
 
     void attachTo(Contract contract) {

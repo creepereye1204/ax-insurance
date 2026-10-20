@@ -3,6 +3,8 @@ package com.ax.core.uw;
 import static com.ax.core.common.TreatmentType.INPATIENT;
 import static com.ax.core.common.TreatmentType.MEDICATION;
 import static com.ax.core.common.TreatmentType.OUTPATIENT;
+import static com.ax.core.product.CoverageCategory.ACCIDENT;
+import static com.ax.core.product.CoverageCategory.ANNUITY;
 import static com.ax.core.product.CoverageCategory.CANCER;
 import static com.ax.core.product.CoverageCategory.MEDICAL;
 import static com.ax.core.product.CoverageCategory.SURGERY;
@@ -52,13 +54,31 @@ class RuleEngineTest {
     }
 
     UwResult run(int age, Map<String, Boolean> answers, List<MedicalRecord> records, List<LocalDate> claims) {
-        return engine.evaluate(1, rules, new UwInput(TODAY, age, answers, records, claims, List.of(MEDICAL, SURGERY, CANCER)));
+        return engine.evaluate(1, rules, new UwInput(TODAY, age, 1, answers, records, claims, List.of(MEDICAL, SURGERY, CANCER)));
     }
 
     @Test
     void 이력이_없으면_전_담보_표준체() {
         UwResult r = run(30, Map.of(), List.of(), List.of());
         assertThat(r.decisions().values()).allMatch(d -> d.outcome() == CoverageOutcome.STANDARD);
+    }
+
+    @Test
+    void 고위험_직업은_상해만_할증() {
+        var jobRule = new UwRule("R-JOB-01", "", 95, RuleCondition.jobRisk(3), List.of(ACCIDENT),
+                UwAction.RATING, RuleParams.rating("직업", 50));
+        UwResult r = engine.evaluate(1, List.of(jobRule),
+                new UwInput(TODAY, 35, 3, Map.of(), List.of(), List.of(), List.of(ACCIDENT, MEDICAL)));
+        assertThat(r.decisions().get(ACCIDENT).ratingPct()).isEqualTo(50);
+        assertThat(r.decisions().get(MEDICAL).outcome()).isEqualTo(CoverageOutcome.STANDARD);
+    }
+
+    @Test
+    void 적립_담보는_병력이_있어도_심사하지_않는다() {
+        UwResult r = engine.evaluate(1, rules, new UwInput(TODAY, 70, 1, Map.of(),
+                List.of(record("C16.9", TODAY.minusYears(1), INPATIENT, false)), List.of(), List.of(ANNUITY)));
+        assertThat(r.decisions().get(ANNUITY).outcome()).isEqualTo(CoverageOutcome.STANDARD);
+        assertThat(r.decisions().get(ANNUITY).matchedRules()).isEmpty();
     }
 
     @Test

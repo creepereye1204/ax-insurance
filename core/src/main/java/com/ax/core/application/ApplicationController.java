@@ -1,7 +1,7 @@
 package com.ax.core.application;
 
 import com.ax.core.application.ApplicationService.AnswerInput;
-import com.ax.core.application.ApplicationService.CoverageInput;
+import com.ax.core.application.ApplicationService.Signature;
 import com.ax.core.contract.ContractRepository;
 import com.ax.core.uw.UwCaseRepository;
 import com.ax.core.uw.UwController;
@@ -32,8 +32,11 @@ public class ApplicationController {
     private final UwCaseRepository uwCaseRepository;
     private final ContractRepository contractRepository;
 
-    public record SubmitRequest(@NotNull Long customerId, @NotNull Long productId, @NotNull Long questionnaireId,
-                                @NotEmpty List<CoverageInput> coverages, @NotEmpty List<AnswerInput> answers) {
+    public record PreviewRequest(@NotNull Long proposalId, @NotNull Long questionnaireId, @NotEmpty List<AnswerInput> answers) {
+    }
+
+    public record SubmitRequest(@NotNull Long proposalId, @NotNull Long questionnaireId, @NotEmpty List<AnswerInput> answers,
+                                @NotNull Signature signature) {
     }
 
     public record DetailResponse(String kcdCode, LocalDate diagnosedOn, String treatment, int treatmentDays, boolean cured) {
@@ -42,24 +45,70 @@ public class ApplicationController {
     public record AnswerResponse(String questionCode, String questionText, boolean answer, List<DetailResponse> details) {
     }
 
-    public record Summary(Long id, String applicationNo, Long customerId, String customerName, String productName,
-                          ApplicationStatus status, String statusLabel, LocalDateTime submittedAt) {
-        public static Summary from(Application a) {
-            return new Summary(a.getId(), a.getApplicationNo(), a.getCustomer().getId(), a.getCustomer().getName(),
-                    a.getProduct().getName(), a.getStatus(), a.getStatus().getLabel(), a.getSubmittedAt());
+    public record CoverageResponse(String name, String categoryLabel, long insuredAmount, long basePremium) {
+    }
+
+    public record AgreementResponse(String code, String text) {
+        static AgreementResponse from(Agreement a) {
+            return new AgreementResponse(a.name(), a.getText());
         }
     }
 
-    public record Detail(Summary summary, int questionnaireVersion, List<AnswerResponse> answers,
+    /** 청약서 본문 (미리보기와 서명 후 조회가 같은 형태) */
+    public record Document(String applicationNo, String proposalNo, Long customerId, String customerName,
+                           LocalDate birthDate, String gender, String consumerType, boolean protectedSenior,
+                           String productName, String productType, String insurancePeriod, int paymentTerm,
+                           long monthlyPremium, Long monthlyContribution, Integer annuityStartAge, String suitability,
+                           List<CoverageResponse> coverages, int questionnaireVersion, List<AnswerResponse> answers,
+                           List<AgreementResponse> requiredAgreements, String documentHash) {
+        static Document of(Application a, List<Agreement> required, String hash) {
+            var c = a.getCustomer();
+            var p = a.getProposal();
+            return new Document(a.getApplicationNo(), p == null ? null : p.getProposalNo(), c.getId(), c.getName(),
+                    c.getBirthDate(), c.getGender().name(), c.getConsumerType().getLabel(),
+                    c.isProtectedSenior(a.getSubmittedAt().toLocalDate()), a.getProduct().getName(),
+                    a.getProduct().getType().getLabel(), a.getProduct().getInsurancePeriod(), a.getPaymentTerm(),
+                    a.getMonthlyPremium(), p == null ? null : p.getMonthlyContribution(),
+                    p == null ? null : p.getAnnuityStartAge(), p == null ? null : p.getSuitability().getLabel(),
+                    a.getCoverages().stream().map(x -> new CoverageResponse(x.getCoverage().getName(),
+                            x.getCoverage().getCategory().getLabel(), x.getInsuredAmount(), x.getBasePremium())).toList(),
+                    a.getQuestionnaire().getVersion(),
+                    a.getAnswers().stream().map(x -> new AnswerResponse(x.getQuestion().getCode(), x.getQuestion().getText(),
+                            x.isAnswer(), x.getDetails().stream().map(d -> new DetailResponse(d.getKcdCode(),
+                                    d.getDiagnosedOn(), d.getTreatment().getLabel(), d.getTreatmentDays(), d.isCured())).toList()))
+                            .toList(),
+                    required.stream().map(AgreementResponse::from).toList(), hash);
+        }
+    }
+
+    public record Summary(Long id, String applicationNo, Long customerId, String customerName, String productName,
+                          ApplicationStatus status, String statusLabel, long monthlyPremium, LocalDateTime submittedAt) {
+        public static Summary from(Application a) {
+            return new Summary(a.getId(), a.getApplicationNo(), a.getCustomer().getId(), a.getCustomer().getName(),
+                    a.getProduct().getName(), a.getStatus(), a.getStatus().getLabel(), a.getMonthlyPremium(), a.getSubmittedAt());
+        }
+    }
+
+    public record SignatureResponse(String signerName, LocalDateTime signedAt, List<AgreementResponse> agreements,
+                                    String documentHash) {
+    }
+
+    public record Detail(Summary summary, Document document, SignatureResponse signature,
                          UwController.CaseResponse uwCase, Long contractId) {
+    }
+
+    @PostMapping("/preview")
+    @Transactional(readOnly = true)
+    public Document preview(@Valid @RequestBody PreviewRequest req) {
+        var draft = applicationService.preview(req.proposalId(), req.questionnaireId(), req.answers());
+        return Document.of(draft.application(), draft.requiredAgreements(), draft.documentHash());
     }
 
     @PostMapping
     @Transactional
     @ResponseStatus(HttpStatus.CREATED)
     public Detail submit(@Valid @RequestBody SubmitRequest req) {
-        var submitted = applicationService.submit(req.customerId(), req.productId(), req.questionnaireId(),
-                req.coverages(), req.answers());
+        var submitted = applicationService.submit(req.proposalId(), req.questionnaireId(), req.answers(), req.signature());
         return detail(submitted.application());
     }
 
@@ -76,14 +125,12 @@ public class ApplicationController {
     }
 
     private Detail detail(Application a) {
-        List<AnswerResponse> answers = a.getAnswers().stream()
-                .map(x -> new AnswerResponse(x.getQuestion().getCode(), x.getQuestion().getText(), x.isAnswer(),
-                        x.getDetails().stream().map(d -> new DetailResponse(d.getKcdCode(), d.getDiagnosedOn(),
-                                d.getTreatment().getLabel(), d.getTreatmentDays(), d.isCured())).toList()))
-                .toList();
+        List<Agreement> agreed = a.getAgreements() == null ? List.of() : a.getAgreements();
+        var signature = a.getSignedAt() == null ? null : new SignatureResponse(a.getSignerName(), a.getSignedAt(),
+                agreed.stream().map(AgreementResponse::from).toList(), a.getDocumentHash());
         var uwCase = uwCaseRepository.findFirstByApplicationIdOrderByIdDesc(a.getId())
                 .map(UwController.CaseResponse::from).orElse(null);
         Long contractId = contractRepository.findByApplicationId(a.getId()).map(c -> c.getId()).orElse(null);
-        return new Detail(Summary.from(a), a.getQuestionnaire().getVersion(), answers, uwCase, contractId);
+        return new Detail(Summary.from(a), Document.of(a, agreed, a.getDocumentHash()), signature, uwCase, contractId);
     }
 }

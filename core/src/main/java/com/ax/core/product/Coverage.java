@@ -14,7 +14,11 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** 담보. 상품에 속하며 가입금액 1,000만원당 월 보험료(기준 요율)를 가진다. */
+/**
+ * 담보 (주계약 또는 특약).
+ * 보험료는 요율표(PremiumRate)에서 성별·나이·납입기간으로 찾는다.
+ * baseRatePer10M / ageGrowthPermille 은 요율표를 산출하는 기초값이다.
+ */
 @Getter
 @Entity
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -38,19 +42,51 @@ public class Coverage {
     @Column(nullable = false, length = 20)
     private CoverageCategory category;
 
+    /** 주계약(필수) 여부 */
     @Column(nullable = false)
-    private long monthlyRatePer10M;
+    private boolean required;
 
-    Coverage(Product product, String code, String name, CoverageCategory category, long monthlyRatePer10M) {
+    @Column(nullable = false)
+    private long minAmount;
+
+    @Column(nullable = false)
+    private long maxAmount;
+
+    @Column(nullable = false)
+    private long defaultAmount;
+
+    @Column(nullable = false)
+    private long amountStep;
+
+    @Column(nullable = false)
+    private long baseRatePer10M;
+
+    /** 나이 1세 증가당 요율 증가율 (천분율, 45 = 4.5%) */
+    @Column(nullable = false)
+    private int ageGrowthPermille;
+
+    Coverage(Product product, String code, String name, CoverageCategory category, boolean required,
+             long minAmount, long maxAmount, long defaultAmount, long amountStep,
+             long baseRatePer10M, int ageGrowthPermille) {
         this.product = product;
         this.code = code;
         this.name = name;
         this.category = category;
-        this.monthlyRatePer10M = monthlyRatePer10M;
+        this.required = required;
+        this.minAmount = minAmount;
+        this.maxAmount = maxAmount;
+        this.defaultAmount = defaultAmount;
+        this.amountStep = amountStep;
+        this.baseRatePer10M = baseRatePer10M;
+        this.ageGrowthPermille = ageGrowthPermille;
     }
 
-    /** 가입금액과 할증률을 반영한 월 보험료 (원 단위 절사). */
-    public long monthlyPremium(long insuredAmount, int ratingPct) {
-        return insuredAmount / 10_000_000 * monthlyRatePer10M * (100 + ratingPct) / 100;
+    /** 적립형 담보(연금·저축)는 가입금액이 아니라 월 납입액으로 설계한다. */
+    public boolean isAccumulation() {
+        return !category.isUnderwritten();
+    }
+
+    public boolean isValidAmount(long amount) {
+        return amount >= minAmount && amount <= maxAmount && (amount - minAmount) % amountStep == 0;
     }
 }

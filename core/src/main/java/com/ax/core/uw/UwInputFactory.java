@@ -41,13 +41,14 @@ public class UwInputFactory {
                 .map(d -> new MedicalRecord(SOURCE_DISCLOSURE, d.getKcdCode(), d.getDiagnosedOn(), d.getTreatment(), d.isCured()))
                 .toList();
         Customer c = app.getCustomer();
-        return new UwInput(asOf, c.ageAt(asOf), answers, records, claimDates(c.getId()), categories);
+        return new UwInput(asOf, c.ageAt(asOf), c.getJobRiskGrade(), answers, records, claimDates(c.getId()), categories);
     }
 
     /** 선심사: 고지 없이 당사 청구이력 + 외부기관 조회 결과만으로 예상 */
     public UwInput forPreUw(Customer customer, List<MedicalRecord> history, List<CoverageCategory> categories) {
         LocalDate asOf = LocalDate.now();
-        return new UwInput(asOf, customer.ageAt(asOf), Map.of(), history, claimDates(customer.getId()), categories);
+        return new UwInput(asOf, customer.ageAt(asOf), customer.getJobRiskGrade(), Map.of(), history,
+                claimDates(customer.getId()), categories);
     }
 
     /** 선심사 조회 대상 이력 (스냅샷으로 저장된다) */

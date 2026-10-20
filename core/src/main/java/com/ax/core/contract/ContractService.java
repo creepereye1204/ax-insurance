@@ -24,12 +24,13 @@ public class ContractService {
     public Contract issue(Application application, List<UwCoverageResult> acceptedResults) {
         LocalDate start = LocalDate.now();
         Contract contract = new Contract(newContractNo(), application.getCustomer(), application.getProduct(),
-                application, start, start.plusYears(TERM_YEARS).minusDays(1));
+                application, application.getPaymentTerm(), start, start.plusYears(TERM_YEARS).minusDays(1));
         for (UwCoverageResult r : acceptedResults) {
             List<ContractExclusion> exclusions = r.getExclusions().stream()
                     .map(e -> new ContractExclusion(e.label(), e.kcd(), start.plusMonths(e.months()).minusDays(1)))
                     .toList();
-            contract.addCoverage(new ContractCoverage(r.getCoverage(), r.getInsuredAmount(), r.getRatingPct(), exclusions));
+            contract.addCoverage(new ContractCoverage(r.getCoverage(), r.getInsuredAmount(), r.getBasePremium(),
+                    r.getRatingPct(), exclusions));
         }
         return contractRepository.save(contract);
     }
@@ -37,6 +38,13 @@ public class ContractService {
     @Transactional(readOnly = true)
     public Contract get(Long id) {
         return contractRepository.findById(id).orElseThrow(() -> new NotFoundException("계약", id));
+    }
+
+    @Transactional
+    public Contract withdraw(Long id) {
+        Contract contract = get(id);
+        contract.withdraw(LocalDate.now());
+        return contract;
     }
 
     @Transactional

@@ -4,6 +4,7 @@ import com.ax.core.ai.AiReviewClient;
 import com.ax.core.ai.AiReviewException;
 import com.ax.core.application.Application;
 import com.ax.core.application.DisclosureAnswer;
+import com.ax.core.claim.ClaimAiReviewer;
 import java.util.List;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -69,7 +70,7 @@ public class UwAiOpinionWriter {
                 %s
                 약관에서 계약 전 알릴 의무, 보장하지 않는 손해 등 관련 조항을 찾아 근거로 제시하고,
                 심사자가 추가로 확인해야 할 사항(필요 서류, 확인할 병력)을 정리해 주세요. 최종 결정은 심사자가 합니다."""
-                .formatted(app.getProduct().getPolicyDocument(),
+                .formatted(ClaimAiReviewer.policyOf(app.getProduct()),
                         app.getCustomer().ageAt(app.getSubmittedAt().toLocalDate()),
                         uwCase.getReferReason(), disclosures, proposals);
     }

@@ -28,7 +28,8 @@ public class RuleEngine {
             ConditionSource.ANSWER, RuleEngine::matchAnswer,
             ConditionSource.MEDICAL, RuleEngine::matchMedical,
             ConditionSource.CLAIM_COUNT, RuleEngine::matchClaimCount,
-            ConditionSource.AGE, (c, in) -> in.age() > c.ageOver()));
+            ConditionSource.AGE, (c, in) -> in.age() > c.ageOver(),
+            ConditionSource.JOB_RISK, (c, in) -> in.jobRiskGrade() >= c.jobRiskAtLeast()));
 
     public UwResult evaluate(int ruleSetVersion, List<UwRule> rules, UwInput input) {
         List<UwRule> matched = rules.stream()
@@ -43,6 +44,10 @@ public class RuleEngine {
     }
 
     private CoverageDecision decide(CoverageCategory category, List<UwRule> matched) {
+        if (!category.isUnderwritten()) {
+            // 연금·저축 적립 담보는 위험 심사 대상이 아니다
+            return new CoverageDecision(category, CoverageOutcome.STANDARD, List.of(), 0, List.of(), List.of());
+        }
         CoverageOutcome outcome = CoverageOutcome.STANDARD;
         List<Exclusion> exclusions = new ArrayList<>();
         int rating = 0;

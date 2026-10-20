@@ -2,6 +2,7 @@ package com.ax.core.contract;
 
 import com.ax.core.application.Application;
 import com.ax.core.common.BaseTimeEntity;
+import com.ax.core.common.BusinessException;
 import com.ax.core.customer.Customer;
 import com.ax.core.product.CoverageCategory;
 import com.ax.core.product.Product;
@@ -63,21 +64,31 @@ public class Contract extends BaseTimeEntity {
     private LocalDate endDate;
 
     @Column(nullable = false)
+    private int paymentTerm;
+
+    @Column(nullable = false)
     private long monthlyPremium;
+
+    /** 청약철회 가능 기한 (증권 수령일로부터 15일 — 계약일 즉시 수령으로 단순화) */
+    private LocalDate withdrawalDeadline;
 
     @OneToMany(mappedBy = "contract", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id")
     private List<ContractCoverage> coverages = new ArrayList<>();
 
+    public static final int WITHDRAWAL_DAYS = 15;
+
     public Contract(String contractNo, Customer customer, Product product, Application application,
-                    LocalDate startDate, LocalDate endDate) {
+                    int paymentTerm, LocalDate startDate, LocalDate endDate) {
         this.contractNo = contractNo;
         this.customer = customer;
         this.product = product;
         this.application = application;
         this.status = ContractStatus.ACTIVE;
+        this.paymentTerm = paymentTerm;
         this.startDate = startDate;
         this.endDate = endDate;
+        this.withdrawalDeadline = startDate.plusDays(WITHDRAWAL_DAYS);
     }
 
     public void addCoverage(ContractCoverage coverage) {
@@ -97,5 +108,17 @@ public class Contract extends BaseTimeEntity {
 
     public void terminate() {
         this.status = ContractStatus.TERMINATED;
+    }
+
+    public boolean canWithdraw(LocalDate today) {
+        return status == ContractStatus.ACTIVE && withdrawalDeadline != null && !today.isAfter(withdrawalDeadline);
+    }
+
+    /** 청약철회: 기한 내 유지 계약만 가능, 납입 보험료 전액 반환 대상 */
+    public void withdraw(LocalDate today) {
+        if (!canWithdraw(today)) {
+            throw new BusinessException("청약철회 기한(" + withdrawalDeadline + ")이 지났거나 유지 중인 계약이 아닙니다.");
+        }
+        this.status = ContractStatus.WITHDRAWN;
     }
 }

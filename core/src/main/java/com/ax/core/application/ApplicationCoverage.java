@@ -33,9 +33,14 @@ public class ApplicationCoverage {
     @Column(nullable = false)
     private long insuredAmount;
 
-    public ApplicationCoverage(Coverage coverage, long insuredAmount) {
+    /** 표준체 기준 월 보험료 (적립 담보는 월 납입액) */
+    @Column(nullable = false)
+    private long basePremium;
+
+    public ApplicationCoverage(Coverage coverage, long insuredAmount, long basePremium) {
         this.coverage = coverage;
         this.insuredAmount = insuredAmount;
+        this.basePremium = basePremium;
     }
 
     void attachTo(Application application) {

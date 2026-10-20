@@ -41,6 +41,10 @@ public class UwCoverageResult {
     @Column(nullable = false)
     private long insuredAmount;
 
+    /** 표준체 기준 월 보험료 */
+    @Column(nullable = false)
+    private long basePremium;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private CoverageOutcome outcome;
@@ -60,10 +64,11 @@ public class UwCoverageResult {
     @Column(nullable = false)
     private List<String> reasons;
 
-    public UwCoverageResult(Coverage coverage, long insuredAmount, CoverageOutcome outcome, List<Exclusion> exclusions,
-                            int ratingPct, List<String> matchedRules, List<String> reasons) {
+    public UwCoverageResult(Coverage coverage, long insuredAmount, long basePremium, CoverageOutcome outcome,
+                            List<Exclusion> exclusions, int ratingPct, List<String> matchedRules, List<String> reasons) {
         this.coverage = coverage;
         this.insuredAmount = insuredAmount;
+        this.basePremium = basePremium;
         this.outcome = outcome;
         this.exclusions = exclusions;
         this.ratingPct = ratingPct;

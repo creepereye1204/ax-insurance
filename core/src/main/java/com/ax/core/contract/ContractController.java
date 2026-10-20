@@ -29,11 +29,14 @@ public class ContractController {
     }
 
     public record Response(Long id, String contractNo, Long customerId, String customerName,
-                           String productName, ContractStatus status, LocalDate startDate, LocalDate endDate,
-                           long monthlyPremium, String applicationNo, List<CoverageResponse> coverages) {
+                           String productName, String productType, ContractStatus status, LocalDate startDate,
+                           LocalDate endDate, int paymentTerm, long monthlyPremium, LocalDate withdrawalDeadline,
+                           boolean withdrawable, String applicationNo, List<CoverageResponse> coverages) {
         public static Response from(Contract c) {
             return new Response(c.getId(), c.getContractNo(), c.getCustomer().getId(), c.getCustomer().getName(),
-                    c.getProduct().getName(), c.getStatus(), c.getStartDate(), c.getEndDate(), c.getMonthlyPremium(),
+                    c.getProduct().getName(), c.getProduct().getType().getLabel(), c.getStatus(), c.getStartDate(),
+                    c.getEndDate(), c.getPaymentTerm(), c.getMonthlyPremium(), c.getWithdrawalDeadline(),
+                    c.canWithdraw(LocalDate.now()),
                     c.getApplication() == null ? null : c.getApplication().getApplicationNo(),
                     c.getCoverages().stream().map(CoverageResponse::from).toList());
         }
@@ -52,6 +55,12 @@ public class ContractController {
     @Transactional(readOnly = true)
     public Response get(@PathVariable Long id) {
         return Response.from(contractService.get(id));
+    }
+
+    @PostMapping("/{id}/withdraw")
+    @Transactional
+    public Response withdraw(@PathVariable Long id) {
+        return Response.from(contractService.withdraw(id));
     }
 
     @PostMapping("/{id}/terminate")
