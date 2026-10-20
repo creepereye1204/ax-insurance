@@ -96,6 +96,36 @@ PR 에서는 읽기 권한만 쓰고, 비밀값이나 운영 서버에 접근하
 
 ### CD
 
-운영 서버(연구실 공용 홈서버) 자동 배포는 self-hosted runner 설치가 필요해 보류.
-공개 레포에서 self-hosted runner 를 쓸 때는 PR 의 코드가 서버에서 실행되지 않도록
-**main 푸시에서만 배포 job 이 돌게** 제한해야 한다. 현재는 서버에서 `scripts/deploy.sh` 로 배포한다.
+`.github/workflows/cd.yml` → 운영 서버의 self-hosted runner(라벨 `ax-deploy`)가 `scripts/cd.sh <sha>` 실행
+
+```
+main 푸시 → CI(테스트) 성공 → CD: 운영 디렉토리 fast-forward → 바뀐 부분만 배포
+                                   core/            → 롤링 무중단 배포
+                                   api/             → AI 서비스 재빌드
+                                   gateway/conf.d/  → nginx reload
+                                   gateway/html/    → 반영 (디렉토리 마운트)
+```
+
+**공개 레포에서 self-hosted runner 를 쓰기 위한 안전장치**
+
+| 위험 | 대응 |
+|---|---|
+| 악의적인 fork PR 이 워크플로를 고쳐 서버에서 코드 실행 | 외부 기여자 PR 워크플로는 **소유자 승인 후에만** 실행 (`fork-pr-contributor-approval: all_external_contributors`) |
+| PR 이 배포 단계 변조 | `workflow_run` 은 항상 **main 의 워크플로 파일**로 실행 |
+| PR 의 CI 결과로 배포 | `workflow_run.event == 'push'` 인 CI 만 배포 |
+| 운영 디렉토리의 작업 내용 손실 | `git merge --ff-only` — 로컬 변경·분기가 있으면 배포 중단 |
+| 동시 배포 | `concurrency: deploy` |
+
+**러너 설치** (서버 관리자가 1회 실행, 사용자 `smalllab` 권한 서비스로 등록)
+
+```bash
+mkdir -p ~/actions-runner-ax && cd ~/actions-runner-ax
+curl -sSL -o runner.tar.gz https://github.com/actions/runner/releases/download/v2.338.0/actions-runner-linux-x64-2.338.0.tar.gz
+tar xzf runner.tar.gz && rm runner.tar.gz
+./config.sh --url https://github.com/creepereye1204/ax-insurance \
+  --token "$(gh api -X POST repos/creepereye1204/ax-insurance/actions/runners/registration-token -q .token)" \
+  --name ax-homeserver --labels ax-deploy --work _work --unattended
+sudo ./svc.sh install smalllab && sudo ./svc.sh start
+```
+
+제거: `sudo ./svc.sh stop && sudo ./svc.sh uninstall && ./config.sh remove --token <제거 토큰>`

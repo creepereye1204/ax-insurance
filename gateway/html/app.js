@@ -241,7 +241,7 @@ async function home() {
     <p>상품 201개(12종) · 요율 약 11.5만 행 · 고객 약 3만 명 · 기존 계약 6만 건 · 청구 50만 건 · 외부기관 이력 5만 건</p></div>
   <div class="card"><h2>체험 시나리오</h2>
   ${table(['고객', '특징', '해볼 것'], scenarios.map((r) => `<tr><td><b>${r[0]}</b></td><td class="small">${r[1]}</td><td class="small">${r[2]}</td></tr>`))}
-  <p class="small muted" style="margin-top:10px">상세: <a href="https://github.com/creepereye1204/insurance.r-e.kr/blob/main/docs/scenarios.md">docs/scenarios.md</a>
+  <p class="small muted" style="margin-top:10px">상세: <a href="https://github.com/creepereye1204/ax-insurance/blob/main/docs/scenarios.md">docs/scenarios.md</a>
    · 심사 기준·약관·고객은 모두 가상입니다.</p></div>`;
 }
 

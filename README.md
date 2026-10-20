@@ -1,6 +1,6 @@
 # Ax — 보험 AI 심사 보조 시스템
 
-[![CI](https://github.com/creepereye1204/insurance.r-e.kr/actions/workflows/ci.yml/badge.svg)](https://github.com/creepereye1204/insurance.r-e.kr/actions/workflows/ci.yml)
+[![CI](https://github.com/creepereye1204/ax-insurance/actions/workflows/ci.yml/badge.svg)](https://github.com/creepereye1204/ax-insurance/actions/workflows/ci.yml)
 
 > 데모: https://www.insurance.r-e.kr
 
@@ -115,7 +115,7 @@ data/       약관 문서 (샘플은 테스트용 가상 약관)
 - [x] 대량 가상 데이터 (고객 3만, 계약 6만, 청구 50만)
 - [ ] 보험나이(상령일), 초회·환산보험료 / 동적 고지(간편 3-2-5) / 특약 연관 규칙·플랜 / 법인고객
 - [x] 서킷브레이커(AI 호출), 기간계 2대 로드밸런싱, 롤링 무중단 배포, CI(GitHub Actions) — [docs/operations.md](docs/operations.md)
-- [ ] CD (운영 서버 자동 배포)
+- [x] CD 워크플로 (main CI 성공 → 운영 서버 self-hosted runner 롤링 배포) — 러너 설치 대기
 - [ ] 성능 측정·개선 (설계 문서 12절)
 - [ ] 직접 구현 에이전트 vs LangGraph 비교 (Eval)
 - [ ] 위험도 예측 모델 (건강검진 공개데이터) + 심사 의견 에이전트

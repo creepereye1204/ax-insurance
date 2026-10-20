@@ -1,0 +1,32 @@
+name: CD
+
+# main 브랜치 CI 가 성공하면 운영 서버(self-hosted runner, 라벨 ax-deploy)에서 배포한다.
+#
+# 공개 레포 보안:
+# - workflow_run 은 항상 기본 브랜치(main)의 이 파일로 실행된다 → PR 이 배포 단계를 바꿀 수 없다
+# - 외부 기여자 PR 의 워크플로는 소유자 승인 후에만 실행 (fork-pr-contributor-approval: all_external_contributors)
+# - push 이벤트로 실행된 CI 만 배포 대상 (PR 의 CI 결과로는 배포하지 않음)
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.repository == 'creepereye1204/ax-insurance' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: [self-hosted, ax-deploy]
+    timeout-minutes: 20
+    steps:
+      - name: 롤링 배포
+        run: /home/smalllab/Docker/Ax/scripts/cd.sh "${{ github.event.workflow_run.head_sha }}"
