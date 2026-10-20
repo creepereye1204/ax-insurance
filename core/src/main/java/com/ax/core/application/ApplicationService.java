@@ -106,7 +106,7 @@ public class ApplicationService {
         Questionnaire questionnaire = questionnaireRepository.findById(questionnaireId)
                 .orElseThrow(() -> new NotFoundException("질문지", questionnaireId));
         Customer customer = proposal.getCustomer();
-        if (!proposal.getProduct().acceptsAge(customer.ageAt(now.toLocalDate()))) {
+        if (!proposal.getProduct().acceptsAge(customer.insuranceAgeAt(now.toLocalDate()))) {
             throw new BusinessException("설계 이후 나이가 바뀌어 가입 가능 나이를 벗어났습니다. 다시 설계하세요.");
         }
 

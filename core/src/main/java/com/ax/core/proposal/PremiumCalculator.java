@@ -7,6 +7,7 @@ import com.ax.core.customer.InvestmentProfile;
 import com.ax.core.product.Coverage;
 import com.ax.core.product.Fund;
 import com.ax.core.product.FundRepository;
+import com.ax.core.product.PremiumConversion;
 import com.ax.core.product.PremiumRateRepository;
 import com.ax.core.product.Product;
 import java.time.LocalDate;
@@ -15,6 +16,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -46,21 +48,31 @@ public class PremiumCalculator {
     public record CoverageQuote(Coverage coverage, long amount, long monthlyPremium) {
     }
 
-    public record Quote(Product product, Customer customer, int age, int paymentTerm, List<CoverageQuote> coverages,
-                        Long monthlyContribution, Integer annuityStartAge, List<FundAllocation> funds,
-                        long monthlyPremium, Illustration illustration, Suitability suitability,
-                        List<String> suitabilityIssues) {
+    /**
+     * @param age                보험나이 (보험료·가입나이 기준)
+     * @param fullAge            만 나이 (참고)
+     * @param nextAgeUpDate      다음 상령일 — 이날부터 보험나이가 1세 올라 보험료가 바뀐다
+     * @param premiumAfterAgeUp  상령일 이후 월 보험료 (상령 후 가입 불가면 null)
+     * @param firstPremium       초회보험료 (월납 1회분)
+     * @param conversionRatePct  환산율
+     * @param convertedPremium   환산보험료 (영업 실적 환산)
+     */
+    public record Quote(Product product, Customer customer, int age, int fullAge, LocalDate nextAgeUpDate,
+                        int paymentTerm, List<CoverageQuote> coverages, Long monthlyContribution,
+                        Integer annuityStartAge, List<FundAllocation> funds, long monthlyPremium,
+                        Long premiumAfterAgeUp, long firstPremium, int conversionRatePct, long convertedPremium,
+                        Illustration illustration, Suitability suitability, List<String> suitabilityIssues) {
     }
 
     public Quote quote(Product product, Customer customer, Input in) {
         LocalDate today = LocalDate.now();
-        int age = customer.ageAt(today);
+        int age = customer.insuranceAgeAt(today);
         if (!product.isOnSale()) {
             throw new BusinessException("판매 중지된 상품입니다: " + product.getName());
         }
         if (!product.acceptsAge(age)) {
-            throw new BusinessException("가입 가능 나이(만 %d~%d세)가 아닙니다. 고객 나이: 만 %d세"
-                    .formatted(product.getMinEntryAge(), product.getMaxEntryAge(), age));
+            throw new BusinessException("가입 가능 나이(보험나이 %d~%d세)가 아닙니다. 고객 보험나이: %d세 (만 %d세)"
+                    .formatted(product.getMinEntryAge(), product.getMaxEntryAge(), age, customer.ageAt(today)));
         }
         if (!product.getPaymentTerms().contains(in.paymentTerm())) {
             throw new BusinessException("선택할 수 없는 납입기간입니다: " + in.paymentTerm() + "년");
@@ -92,8 +104,24 @@ public class PremiumCalculator {
                 illustration = Illustration.fixed(age, contribution, in.paymentTerm(), annuityAge);
             }
         }
-        return new Quote(product, customer, age, in.paymentTerm(), quotes, contribution, annuityAge, funds,
-                premium, illustration, suitability, issues);
+        long savingsPart = contribution == null ? 0 : contribution;
+        Long afterAgeUp = premiumAt(product, customer, age + 1, in).map(p -> p + savingsPart).orElse(null);
+        int rate = PremiumConversion.ratePct(product.getType(), in.paymentTerm(), product.isRenewable());
+        return new Quote(product, customer, age, customer.ageAt(today), customer.nextAgeUpDate(today), in.paymentTerm(),
+                quotes, contribution, annuityAge, funds, premium, afterAgeUp, premium, rate,
+                PremiumConversion.converted(premium, rate), illustration, suitability, issues);
+    }
+
+    /** 상령 후 보험나이로 위험 보험료를 다시 계산 (가입 나이를 벗어나거나 요율이 없으면 empty) */
+    private Optional<Long> premiumAt(Product product, Customer customer, int age, Input in) {
+        if (!product.acceptsAge(age)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(quoteCoverages(product, customer, age, in).stream().mapToLong(CoverageQuote::monthlyPremium).sum());
+        } catch (BusinessException e) {
+            return Optional.empty();
+        }
     }
 
     private List<CoverageQuote> quoteCoverages(Product product, Customer customer, int age, Input in) {
@@ -155,7 +183,7 @@ public class PremiumCalculator {
             throw new BusinessException("연금개시나이를 선택하세요: " + product.getAnnuityStartAges());
         }
         if (start < age + in.paymentTerm()) {
-            throw new BusinessException("연금개시나이는 납입 완료 나이(만 %d세) 이후여야 합니다.".formatted(age + in.paymentTerm()));
+            throw new BusinessException("연금개시나이는 납입 완료 나이(보험나이 %d세) 이후여야 합니다.".formatted(age + in.paymentTerm()));
         }
         return start;
     }

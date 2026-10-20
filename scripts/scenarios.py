@@ -174,7 +174,7 @@ def _():
         raise AssertionError("나이 초과인데 설계됨")
     except ApiError as e:
         assert "가입 가능 나이" in str(e.detail), e.detail
-    simple = product("WHOLE_LIFE", lambda x: x["simplifiedUw"] and x["maxEntryAge"] >= 71)
+    simple = product("WHOLE_LIFE", lambda x: x["simplifiedUw"] and x["maxEntryAge"] >= c["insuranceAge"])
     p = design(c, simple, 10)
     try:
         apply(p, c, agreements=["EXPLAINED", "TERMS_RECEIVED", "DISCLOSURE_TRUE", "PRIVACY"])
@@ -209,7 +209,7 @@ def _equity_funds(prod):
 @scenario("S07 오안정(안정형): 변액연금 주식형 → 부적합, 확인 없이 발행 불가 / 확인 후 발행")
 def _():
     c = customer("오안정")
-    prod = product("VARIABLE_ANNUITY", lambda x: x["maxEntryAge"] >= 41)
+    prod = product("VARIABLE_ANNUITY", lambda x: x["maxEntryAge"] >= c["insuranceAge"])
     funds = _equity_funds(prod)
     try:
         design(c, prod, 20, contribution=300000, annuity_age=65, funds=funds)
@@ -224,7 +224,7 @@ def _():
 @scenario("S08 정전문(전문금융소비자): 변액 적합성 원칙 적용 제외")
 def _():
     c = customer("정전문")
-    prod = product("VARIABLE_ANNUITY", lambda x: x["maxEntryAge"] >= 46)
+    prod = product("VARIABLE_ANNUITY", lambda x: x["maxEntryAge"] >= c["insuranceAge"])
     p = design(c, prod, 10, contribution=500000, annuity_age=65, funds=_equity_funds(prod))
     assert p["suitabilityLabel"].startswith("전문금융소비자"), p["suitabilityLabel"]
     return p["suitabilityLabel"]
@@ -312,6 +312,18 @@ def _():
     except ApiError as e:
         assert "이미 청약으로 전환" in str(e.detail), e.detail
     return "검증 3건 정상"
+
+
+@scenario("S16 보험나이·상령일: 설계서 유효기간은 상령일 전날을 넘지 않고, 상령 후 보험료가 표시된다")
+def _():
+    c = customer("김정상")
+    p = design(c, product("WHOLE_LIFE", lambda x: not x["simplifiedUw"]), 20)
+    assert p["insuredAge"] == c["insuranceAge"], (p["insuredAge"], c["insuranceAge"])
+    assert p["validUntil"] < p["nextAgeUpDate"], (p["validUntil"], p["nextAgeUpDate"])
+    assert p["premiumAfterAgeUp"] and p["premiumAfterAgeUp"] > p["monthlyPremium"], p["premiumAfterAgeUp"]
+    assert p["firstPremium"] == p["monthlyPremium"]
+    assert abs(p["convertedPremium"] - p["monthlyPremium"] * p["conversionRatePct"] / 100) <= 10, p["convertedPremium"]
+    return f"보험나이 {p['insuredAge']}세, 상령일 {p['nextAgeUpDate']}, {p['monthlyPremium']:,} → {p['premiumAfterAgeUp']:,}원, 환산 {p['convertedPremium']:,}원"
 
 
 @scenario("S15 전산심사 사전 실행: 김정상 자동 승인 예상 / 박당뇨 당뇨 고지 시 본사 이관 예상 (저장 안 됨)")

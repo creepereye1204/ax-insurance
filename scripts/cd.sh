@@ -14,7 +14,10 @@ set -euo pipefail
 SHA=${1:?배포할 커밋 SHA 를 지정하세요}
 cd "$(dirname "$0")/.."
 
-before=$(git rev-parse HEAD)
+# 비교 기준은 "마지막으로 배포에 성공한 커밋" (.deployed-sha).
+# 운영 디렉토리에서 직접 커밋한 경우에도 HEAD 가 아니라 실제로 떠 있는 버전과 비교해야 배포가 누락되지 않는다.
+STATE=.deployed-sha
+before=$(cat "$STATE" 2>/dev/null || git rev-parse HEAD)
 git fetch --quiet origin main
 git merge --ff-only --quiet "$SHA"
 after=$(git rev-parse HEAD)
@@ -23,6 +26,7 @@ changed=$(git diff --name-only "$before" "$after")
 echo "[cd] ${before:0:7} → ${after:0:7}"
 if [ -z "$changed" ]; then
   echo "[cd] 변경 없음"
+  echo "$after" > "$STATE"
   exit 0
 fi
 echo "$changed" | sed 's/^/[cd]   /'
@@ -40,4 +44,5 @@ if grep -q '^gateway/conf.d/' <<<"$changed"; then
   docker compose exec -T gateway nginx -s reload
 fi
 
+echo "$after" > "$STATE"
 echo "[cd] 운영 상태: $(curl -fs localhost:8032/core/ops/status)"

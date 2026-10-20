@@ -88,7 +88,7 @@ async function customerPicker(el, selectedId, onChange) {
   if (selectedId) selected = (await api(`/core/customers/${selectedId}`)).customer;
   function render() {
     if (selected) {
-      el.innerHTML = `<span class="chosen"><b>${esc(selected.name)}</b> 만 ${selected.age}세 ${selected.gender === 'M' ? '남' : '여'}
+      el.innerHTML = `<span class="chosen"><b>${esc(selected.name)}</b> 보험나이 ${selected.insuranceAge}세(만 ${selected.age}) ${selected.gender === 'M' ? '남' : '여'}
         · ${esc(selected.occupation)} ${consumerTag(selected)} <span class="small muted">#${selected.id}</span>
         <button class="btn ghost sm" type="button">변경</button></span>`;
       el.querySelector('button').onclick = () => { selected = null; render(); onChange(null); };
@@ -278,8 +278,8 @@ async function customers(params) {
       <button class="btn ghost">검색</button>
       <span class="spacer"></span><span class="muted small">총 ${data.totalElements.toLocaleString()}명</span>
     </form>
-    ${table(['ID', '이름', '생년월일', '나이', '성별', '직업', '소비자 구분', '투자성향', '연락처'], data.content.map((c) => `
-      <tr class="click" data-href="#/customers/${c.id}"><td>${c.id}</td><td><b>${esc(c.name)}</b></td><td>${c.birthDate}</td><td>만 ${c.age}세</td>
+    ${table(['ID', '이름', '생년월일', '보험나이(만)', '성별', '직업', '소비자 구분', '투자성향', '연락처'], data.content.map((c) => `
+      <tr class="click" data-href="#/customers/${c.id}"><td>${c.id}</td><td><b>${esc(c.name)}</b></td><td>${c.birthDate}</td><td>${c.insuranceAge}세 (${c.age})</td>
       <td>${c.gender === 'M' ? '남' : '여'}</td><td class="small">${esc(c.occupation)} (${c.jobRiskGrade})</td><td>${consumerTag(c)}</td>
       <td class="small">${esc(c.investmentProfileLabel || '-')}</td><td>${esc(maskPhone(c.phone))}</td></tr>`))}
     <div class="actions" style="margin-top:10px">
@@ -328,7 +328,8 @@ async function customerDetail(params, id) {
   ${c.protectedSenior ? '<div class="notice">만 65세 이상 일반금융소비자 — 청약 시 고령자 보호 확인 절차가 필요합니다.</div>' : ''}
   <div class="grid2">
     <div class="card"><h2>기본 정보</h2><dl class="kv">
-      <dt>생년월일</dt><dd>${c.birthDate} (만 ${c.age}세)</dd><dt>성별</dt><dd>${c.gender === 'M' ? '남' : '여'}</dd>
+      <dt>생년월일</dt><dd>${c.birthDate} (만 ${c.age}세)</dd>
+      <dt>보험나이</dt><dd>${c.insuranceAge}세 <span class="small muted">· 다음 상령일 ${c.nextAgeUpDate}</span></dd><dt>성별</dt><dd>${c.gender === 'M' ? '남' : '여'}</dd>
       <dt>연락처</dt><dd>${esc(maskPhone(c.phone))}</dd><dt>직업</dt><dd>${esc(c.occupation)} (위험 ${c.jobRiskGrade}등급)</dd>
       <dt>소비자 구분</dt><dd>${consumerTag(c)}</dd><dt>등록일</dt><dd>${dt(c.createdAt)}</dd></dl></div>
     <div class="card"><h2>투자성향 (변액보험 적합성)</h2>
@@ -445,12 +446,12 @@ function renderDesignForm(customer, product) {
   $('quote').innerHTML = '';
   if (!customer || !product) { form.innerHTML = ''; return; }
   const s = product.summary;
-  const age = customer.age;
+  const age = customer.insuranceAge;
   const ageOk = age >= s.minEntryAge && age <= s.maxEntryAge;
   form.innerHTML = `
   <div class="card"><h2>3. 설계 — ${esc(s.name)}</h2>
-    <p class="small muted">${esc(s.typeLabel)} · 가입나이 만 ${s.minEntryAge}~${s.maxEntryAge}세 · 보험기간 ${esc(s.insurancePeriod)}
-      ${ageOk ? '' : ` · <span class="t-bad">고객 나이(만 ${age}세)로는 가입할 수 없습니다</span>`}</p>
+    <p class="small muted">${esc(s.typeLabel)} · 가입나이(보험나이) ${s.minEntryAge}~${s.maxEntryAge}세 · 보험기간 ${esc(s.insurancePeriod)}
+      ${ageOk ? '' : ` · <span class="t-bad">고객 보험나이(${age}세)로는 가입할 수 없습니다</span>`}</p>
     <div class="row">
       <div><label>납입기간</label><select id="term">${s.paymentTerms.map((t) => `<option value="${t}" ${t === 20 ? 'selected' : ''}>${t === 1 ? '1년 갱신' : t + '년납'}</option>`).join('')}</select></div>
       ${product.savings ? `<div><label>월 납입액 (${amountText(product.minMonthlyContribution)}~${amountText(product.maxMonthlyContribution)})</label>
@@ -488,6 +489,20 @@ function designBody(customer, product, ack) {
   };
 }
 
+/** 초회·환산보험료, 상령일·상령 후 보험료 (설계 결과와 설계서 공통) */
+function premiumFacts(q) {
+  if (q.firstPremium == null) return '';
+  const diff = q.premiumAfterAgeUp == null ? null : q.premiumAfterAgeUp - q.monthlyPremium;
+  return `${table(['초회보험료', '환산보험료', '다음 상령일', '상령일 이후 월 보험료'], [`<tr>
+      <td class="num">${won(q.firstPremium)} <span class="small muted">(월납 1회분)</span></td>
+      <td class="num">${won(q.convertedPremium)} <span class="small muted">(환산율 ${q.conversionRatePct}%)</span></td>
+      <td>${q.nextAgeUpDate}</td>
+      <td class="num">${q.premiumAfterAgeUp == null ? '<span class="t-bad">가입 불가(나이 초과)</span>'
+        : `${won(q.premiumAfterAgeUp)} <span class="small ${diff > 0 ? 't-bad' : 'muted'}">(${diff >= 0 ? '+' : ''}${won(diff)})</span>`}</td></tr>`])}
+    <p class="small muted">상령일부터 보험나이가 1세 올라 보험료가 바뀝니다. 설계서 유효기간은 상령일 전날을 넘지 않습니다.
+      환산보험료는 영업 실적 환산 기준(가상)입니다.</p>`;
+}
+
 function illustrationTable(il) {
   if (!il) return '';
   return `<h3>적립금(해지환급금) 예시 <span class="small muted" style="font-weight:400">${esc(il.assumption)}</span></h3>
@@ -504,7 +519,8 @@ async function calculate(customer, product, ack) {
     const unsuitable = q.suitability === 'UNSUITABLE';
     $('quote').innerHTML = `
     <div class="card"><h2>보험료 계산 결과</h2>
-      <p>월 보험료 <span class="big">${won(q.monthlyPremium)}</span> <span class="small muted">· 만 ${q.age}세 기준 · ${q.paymentTerm === 1 ? '1년 갱신' : q.paymentTerm + '년납'}</span></p>
+      <p>월 보험료 <span class="big">${won(q.monthlyPremium)}</span> <span class="small muted">· 보험나이 ${q.age}세(만 ${q.fullAge}) 기준 · ${q.paymentTerm === 1 ? '1년 갱신' : q.paymentTerm + '년납'}</span></p>
+      ${premiumFacts(q)}
       ${table(['담보', '분류', '가입금액', '월 보험료'], q.coverages.map((c) => `<tr><td>${esc(c.name)}</td><td class="small">${esc(c.categoryLabel)}</td>
         <td class="num">${c.insuredAmount ? amountText(c.insuredAmount) : '-'}</td><td class="num">${c.monthlyPremium ? won(c.monthlyPremium) : '-'}</td></tr>`)
         .concat(q.monthlyContribution ? [`<tr><td>적립 보험료</td><td class="small">저축·연금</td><td></td><td class="num">${won(q.monthlyContribution)}</td></tr>`] : []))}
@@ -538,13 +554,14 @@ async function proposalDetail(params, id) {
     ${canApply ? `<a class="btn" href="#/apply?proposal=${p.id}">청약 진행</a>` : `<span class="small muted">${p.expired ? '유효기간 만료' : esc(p.statusLabel)}</span>`}
   </div>
   <div class="doc">
-    <h2 class="title">보험 가입설계서</h2><div class="docno">${esc(p.proposalNo)} · 발행 ${dt(p.issuedAt)} · 유효기간 ${p.validUntil}까지 · ${esc(p.statusLabel)}</div>
+    <h2 class="title">보험 가입설계서</h2><div class="docno">${esc(p.proposalNo)} · 발행 ${dt(p.issuedAt)} · 유효기간 ${p.validUntil}까지${p.validUntilReason ? ' (' + esc(p.validUntilReason) + ')' : ''} · ${esc(p.statusLabel)}</div>
     <h3>계약 정보</h3><dl class="kv">
-      <dt>계약자·피보험자</dt><dd>${esc(p.customerName)} (만 ${p.insuredAge}세, ${esc(p.consumerType)})</dd>
+      <dt>계약자·피보험자</dt><dd>${esc(p.customerName)} (보험나이 ${p.insuredAge}세, ${esc(p.consumerType)})</dd>
       <dt>상품</dt><dd>${esc(p.productName)} <span class="small muted">${esc(p.productType)}</span></dd>
       <dt>보험기간</dt><dd>${esc(p.insurancePeriod)}</dd><dt>납입기간</dt><dd>${p.paymentTerm === 1 ? '1년 갱신' : p.paymentTerm + '년 (월납)'}</dd>
       ${p.annuityStartAge ? `<dt>연금개시</dt><dd>만 ${p.annuityStartAge}세</dd>` : ''}
       <dt>월 보험료</dt><dd><span class="big">${won(p.monthlyPremium)}</span></dd></dl>
+    ${premiumFacts(p)}
     <h3>보장 내용</h3>${table(['담보', '분류', '가입금액', '월 보험료'], p.coverages.map((c) => `
       <tr><td>${esc(c.name)} ${c.required ? '(주계약)' : ''}</td><td>${esc(c.categoryLabel)}</td>
       <td class="num">${c.insuredAmount ? amountText(c.insuredAmount) : '-'}</td><td class="num">${c.monthlyPremium ? won(c.monthlyPremium) : '-'}</td></tr>`))}

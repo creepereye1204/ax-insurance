@@ -87,6 +87,29 @@ public class Customer extends BaseTimeEntity {
         return Period.between(birthDate, date).getYears();
     }
 
+    /** 보험나이: 만 나이에서 6개월 이상 끝수는 1세로 올린다. 보험료·가입나이 판단 기준 */
+    public int insuranceAgeAt(LocalDate date) {
+        Period p = Period.between(birthDate, date);
+        return p.getYears() + (p.getMonths() >= 6 ? 1 : 0);
+    }
+
+    /**
+     * 다음 상령일: 보험나이가 실제로 1세 오르는 첫날.
+     * 대략 "생일 + 6개월"이지만 월말 생일(예: 8/31)은 2월에 6개월이 차지 않아 다음 달 1일이 되므로,
+     * 근처 날짜부터 보험나이가 바뀌는 날을 직접 찾는다 (insuranceAgeAt 과 항상 일치).
+     */
+    public LocalDate nextAgeUpDate(LocalDate date) {
+        int current = insuranceAgeAt(date);
+        LocalDate d = birthDate.plusYears(current).plusMonths(6).minusDays(3);
+        if (!d.isAfter(date)) {
+            d = date.plusDays(1);
+        }
+        while (insuranceAgeAt(d) <= current) {
+            d = d.plusDays(1);
+        }
+        return d;
+    }
+
     /** 고령 금융소비자 보호 대상 (일반금융소비자 + 만 65세 이상) */
     public boolean isProtectedSenior(LocalDate date) {
         return consumerType == ConsumerType.GENERAL && ageAt(date) >= SENIOR_AGE;

@@ -73,13 +73,15 @@ public class CustomerController {
     public record ConsentRequest(@NotNull ConsentType type) {
     }
 
-    public record Response(Long id, String name, LocalDate birthDate, int age, Gender gender, String phone,
+    public record Response(Long id, String name, LocalDate birthDate, int age, int insuranceAge, LocalDate nextAgeUpDate,
+                           Gender gender, String phone,
                            ConsumerType consumerType, String consumerTypeLabel, String occupation, int jobRiskGrade,
                            InvestmentProfile investmentProfile, String investmentProfileLabel, LocalDateTime profiledAt,
                            boolean protectedSenior, LocalDateTime createdAt) {
         static Response from(Customer c) {
             LocalDate today = LocalDate.now();
-            return new Response(c.getId(), c.getName(), c.getBirthDate(), c.ageAt(today), c.getGender(),
+            return new Response(c.getId(), c.getName(), c.getBirthDate(), c.ageAt(today), c.insuranceAgeAt(today),
+                    c.nextAgeUpDate(today), c.getGender(),
                     c.getPhone(), c.getConsumerType(), c.getConsumerType().getLabel(), c.getOccupation(),
                     c.getJobRiskGrade(), c.getInvestmentProfile(),
                     c.getInvestmentProfile() == null ? null : c.getInvestmentProfile().getLabel(), c.getProfiledAt(),

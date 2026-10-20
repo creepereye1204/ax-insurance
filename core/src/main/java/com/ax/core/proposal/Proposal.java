@@ -69,6 +69,19 @@ public class Proposal extends BaseTimeEntity {
     @Column(nullable = false)
     private long monthlyPremium;
 
+    /** 다음 상령일 (설계서 유효기간은 상령일 전날을 넘지 않는다) */
+    private LocalDate nextAgeUpDate;
+
+    /** 상령일 이후 월 보험료 (상령 후 가입 불가면 null) */
+    private Long premiumAfterAgeUp;
+
+    // 아래 필드는 기존 설계서(기능 추가 전 발행분)에는 값이 없으므로 null 허용 — 운영 DB 무중단 컬럼 추가
+    private Long firstPremium;
+
+    private Integer conversionRatePct;
+
+    private Long convertedPremium;
+
     @JdbcTypeCode(SqlTypes.JSON)
     private Illustration illustration;
 
@@ -89,6 +102,9 @@ public class Proposal extends BaseTimeEntity {
     @Column(nullable = false)
     private LocalDate validUntil;
 
+    @Column(length = 50)
+    private String validUntilReason;
+
     @OneToMany(mappedBy = "proposal", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id")
     private List<ProposalCoverage> coverages = new ArrayList<>();
@@ -103,12 +119,21 @@ public class Proposal extends BaseTimeEntity {
         this.annuityStartAge = q.annuityStartAge();
         this.funds = q.funds();
         this.monthlyPremium = q.monthlyPremium();
+        this.nextAgeUpDate = q.nextAgeUpDate();
+        this.premiumAfterAgeUp = q.premiumAfterAgeUp();
+        this.firstPremium = q.firstPremium();
+        this.conversionRatePct = q.conversionRatePct();
+        this.convertedPremium = q.convertedPremium();
         this.illustration = q.illustration();
         this.suitability = q.suitability();
         this.suitabilityIssues = q.suitabilityIssues();
         this.status = ProposalStatus.ISSUED;
         this.issuedAt = LocalDateTime.now();
-        this.validUntil = issuedAt.toLocalDate().plusDays(VALID_DAYS);
+        // 상령일이 지나면 보험나이가 바뀌어 보험료가 달라지므로 유효기간은 상령일 전날까지로 제한
+        LocalDate byDays = issuedAt.toLocalDate().plusDays(VALID_DAYS);
+        LocalDate beforeAgeUp = q.nextAgeUpDate().minusDays(1);
+        this.validUntil = byDays.isBefore(beforeAgeUp) ? byDays : beforeAgeUp;
+        this.validUntilReason = byDays.isBefore(beforeAgeUp) ? "발행 후 " + VALID_DAYS + "일" : "상령일(" + q.nextAgeUpDate() + ") 전날";
         for (PremiumCalculator.CoverageQuote cq : q.coverages()) {
             coverages.add(new ProposalCoverage(this, cq.coverage(), cq.amount(), cq.monthlyPremium()));
         }

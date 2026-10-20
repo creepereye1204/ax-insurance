@@ -38,15 +38,17 @@ public class ProposalController {
                                long insuredAmount, long monthlyPremium) {
     }
 
-    public record QuoteResponse(int age, int paymentTerm, List<CoverageLine> coverages, Long monthlyContribution,
-                                Integer annuityStartAge, List<FundAllocation> funds, long monthlyPremium,
-                                Illustration illustration, String suitability, String suitabilityLabel,
-                                List<String> suitabilityIssues) {
+    public record QuoteResponse(int age, int fullAge, LocalDate nextAgeUpDate, int paymentTerm, List<CoverageLine> coverages,
+                                Long monthlyContribution, Integer annuityStartAge, List<FundAllocation> funds,
+                                long monthlyPremium, Long premiumAfterAgeUp, long firstPremium, int conversionRatePct,
+                                long convertedPremium, Illustration illustration, String suitability,
+                                String suitabilityLabel, List<String> suitabilityIssues) {
         static QuoteResponse from(PremiumCalculator.Quote q) {
-            return new QuoteResponse(q.age(), q.paymentTerm(), q.coverages().stream()
+            return new QuoteResponse(q.age(), q.fullAge(), q.nextAgeUpDate(), q.paymentTerm(), q.coverages().stream()
                     .map(c -> new CoverageLine(c.coverage().getId(), c.coverage().getName(),
                             c.coverage().getCategory().getLabel(), c.coverage().isRequired(), c.amount(), c.monthlyPremium()))
                     .toList(), q.monthlyContribution(), q.annuityStartAge(), q.funds(), q.monthlyPremium(),
+                    q.premiumAfterAgeUp(), q.firstPremium(), q.conversionRatePct(), q.convertedPremium(),
                     q.illustration(), q.suitability().name(), q.suitability().getLabel(), q.suitabilityIssues());
         }
     }
@@ -55,17 +57,19 @@ public class ProposalController {
                            String customerName, String consumerType, Long productId, String productName,
                            String productType, String insurancePeriod, int insuredAge, int paymentTerm,
                            Long monthlyContribution, Integer annuityStartAge, List<FundAllocation> funds,
-                           long monthlyPremium, Illustration illustration, String suitabilityLabel,
-                           List<String> suitabilityIssues, LocalDateTime issuedAt, LocalDate validUntil,
-                           boolean expired, List<CoverageLine> coverages) {
+                           long monthlyPremium, LocalDate nextAgeUpDate, Long premiumAfterAgeUp, Long firstPremium,
+                           Integer conversionRatePct, Long convertedPremium, Illustration illustration,
+                           String suitabilityLabel, List<String> suitabilityIssues, LocalDateTime issuedAt,
+                           LocalDate validUntil, String validUntilReason, boolean expired, List<CoverageLine> coverages) {
         public static Response from(Proposal p) {
             return new Response(p.getId(), p.getProposalNo(), p.getStatus().name(), p.getStatus().getLabel(),
                     p.getCustomer().getId(), p.getCustomer().getName(), p.getCustomer().getConsumerType().getLabel(),
                     p.getProduct().getId(), p.getProduct().getName(), p.getProduct().getType().getLabel(),
                     p.getProduct().getInsurancePeriod(), p.getInsuredAge(), p.getPaymentTerm(),
                     p.getMonthlyContribution(), p.getAnnuityStartAge(), p.getFunds(), p.getMonthlyPremium(),
-                    p.getIllustration(), p.getSuitability().getLabel(), p.getSuitabilityIssues(), p.getIssuedAt(),
-                    p.getValidUntil(), p.isExpired(LocalDate.now()),
+                    p.getNextAgeUpDate(), p.getPremiumAfterAgeUp(), p.getFirstPremium(), p.getConversionRatePct(),
+                    p.getConvertedPremium(), p.getIllustration(), p.getSuitability().getLabel(), p.getSuitabilityIssues(),
+                    p.getIssuedAt(), p.getValidUntil(), p.getValidUntilReason(), p.isExpired(LocalDate.now()),
                     p.getCoverages().stream().map(c -> new CoverageLine(c.getCoverage().getId(), c.getCoverage().getName(),
                             c.getCoverage().getCategory().getLabel(), c.getCoverage().isRequired(), c.getInsuredAmount(),
                             c.getMonthlyPremium())).toList());
