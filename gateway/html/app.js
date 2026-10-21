@@ -76,10 +76,66 @@ function bindRows(selector = 'tr.click') {
 
 const cache = {};
 async function cached(key, path) { return (cache[key] ??= await api(path)); }
-const questionnaire = () => cached('questionnaire', '/core/questionnaires/current');
+/** 상품 심사 유형에 맞는 질문지 (일반심사 → 표준, 간편심사형 → 간편고지 3-2-5) */
+const questionnaire = (productId) => cached(`qn-${productId}`, `/core/questionnaires/current?productId=${productId}`);
 const kcdList = () => cached('kcd', '/core/kcd');
 const productTypes = () => cached('types', '/core/products/types');
 const kcdDatalist = (kcd) => `<datalist id="kcd-list">${kcd.map((k) => `<option value="${esc(k.code)}">${esc(k.name)}</option>`).join('')}</datalist>`;
+
+// ------------------------------------------------------------ 알릴의무 고지 입력 (청약·선심사 공용)
+function disclosureQuestions(qn) {
+  return qn.questions.map((q) => `
+    <div class="question" data-qid="${q.id}" data-detail="${q.detailRequired}">
+      <div class="q">${esc(q.code)}. ${esc(q.text)} ${q.lookbackMonths ? `<small>(최근 ${q.lookbackMonths}개월)</small>` : ''}</div>
+      <div class="yn"><label><input type="radio" name="q${q.id}" value="false" checked> 아니오</label>
+        <label><input type="radio" name="q${q.id}" value="true"> 예</label></div>
+      <div class="details"></div>
+      ${q.detailRequired ? '<button class="btn ghost sm add" hidden style="margin-top:8px">+ 상세 추가</button>' : ''}
+    </div>`).join('');
+}
+
+function bindDisclosure(root) {
+  const detailRow = () => {
+    const div = document.createElement('div');
+    div.className = 'detail-row';
+    div.innerHTML = `
+      <div><label>질병코드 (KCD)</label><input class="d-kcd" list="kcd-list" placeholder="예) E11.9, K29.7"></div>
+      <div><label>진단일</label><input class="d-date" type="date" max="${today()}"></div>
+      <div><label>치료</label><select class="d-treat">${Object.entries(TREATMENT).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+      <div><label>치료일수</label><input class="d-days" type="number" min="0" value="1"></div>
+      <div><label>완치</label><select class="d-cured"><option value="false">아니오</option><option value="true">예</option></select></div>
+      <div><button class="btn ghost sm d-del">삭제</button></div>`;
+    div.querySelector('.d-del').onclick = () => div.remove();
+    return div;
+  };
+  root.querySelectorAll('.question').forEach((qEl) => {
+    const details = qEl.querySelector('.details'), add = qEl.querySelector('.add');
+    qEl.querySelectorAll('input[type=radio]').forEach((r) => (r.onchange = () => {
+      const yes = qEl.querySelector('input[type=radio]:checked').value === 'true';
+      if (add) add.hidden = !yes;
+      if (yes && qEl.dataset.detail === 'true' && !details.children.length) details.append(detailRow());
+      if (!yes) details.innerHTML = '';
+    }));
+    if (add) add.onclick = () => details.append(detailRow());
+  });
+  return () => [...root.querySelectorAll('.question')].map((qEl) => ({
+    questionId: Number(qEl.dataset.qid),
+    answer: qEl.querySelector('input[type=radio]:checked').value === 'true',
+    details: [...qEl.querySelectorAll('.detail-row')].map((d) => ({
+      kcdCode: d.querySelector('.d-kcd').value.trim(), diagnosedOn: d.querySelector('.d-date').value || null,
+      treatment: d.querySelector('.d-treat').value, treatmentDays: Number(d.querySelector('.d-days').value || 0),
+      cured: d.querySelector('.d-cured').value === 'true',
+    })),
+  }));
+}
+
+/** 심사 신호등: GREEN 표준체 / YELLOW 조건부·본사 심사 / RED 연기·거절 */
+function signalLight(signal, label) {
+  const lamp = (k) => `<i class="lamp ${k.toLowerCase()}${k === signal ? ' on' : ''}"></i>`;
+  return `<span class="signal" title="${esc(label || '')}">${lamp('RED')}${lamp('YELLOW')}${lamp('GREEN')}</span>${label ? ` <b class="signal-label s-${signal.toLowerCase()}">${esc(label)}</b>` : ''}`;
+}
+const signalDot = (signal) => `<i class="lamp ${signal.toLowerCase()} on" title="${signal}"></i>`;
+const uwTypeTag = (simplified) => simplified ? tag('간편심사형 3-2-5', 't-warn') : tag('표준심사', 't-muted');
 
 // ------------------------------------------------------------ 검색형 고객 선택기
 /** 고객 3만 명 → 드롭다운 대신 이름·연락처 검색으로 고른다 */
@@ -578,44 +634,71 @@ async function preUw(params) {
   const view = activeView;
   view.innerHTML = `
   <h1>선심사</h1>
-  <p class="sub">청약 전에 고객 동의를 받아 <b>당사 청구이력 + 외부기관(Mock)</b>을 조회하고, 같은 심사 룰로 담보별 <b>예상</b> 결과를 냅니다. 구속력은 없습니다.</p>
+  <p class="sub">청약 전에 담보별 <b>예상</b> 결과를 신호등으로 봅니다(구속력 없음). 근거는 ① 고객 동의를 받은 <b>당사 청구이력 + 외부기관(Mock) 조회</b>,
+    ② 고객이 미리 답한 <b>알릴의무 고지</b> — 하나 이상 필요합니다. 간편심사형 상품은 간편고지(3-2-5) 기준으로 판단합니다.</p>
   <div class="card"><h2>고객</h2><div id="cust"></div><div id="consent-box" class="small" style="margin-top:8px"></div></div>
   <div class="card"><h2>상품</h2><div id="prod"></div></div>
+  <div class="card" id="disc-card" hidden><h2>알릴의무 고지 <span id="qn-title" class="small muted"></span></h2>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--ink);margin-bottom:8px"><input type="checkbox" id="use-disc"> 고객이 고지 내용을 미리 답함 (고지 기반 선심사)</label>
+    <div id="disc" hidden></div></div>
   <div class="card"><div class="actions"><button class="btn" id="run">선심사 실행</button></div><div class="error" id="err" hidden></div></div>
   <div id="result"></div>`;
-  let customer = null, product = null;
+  const kcd = await kcdList();
+  view.insertAdjacentHTML('beforeend', kcdDatalist(kcd));
+  let customer = null, product = null, qn = null, collect = null;
   async function refreshConsent() {
     if (!customer) { $('consent-box').innerHTML = ''; return; }
     const d = await api(`/core/customers/${customer.id}`);
     const v = d.consents.find((x) => x.valid);
     $('consent-box').innerHTML = v ? `${tag('동의 유효', 't-ok')} ${esc(v.label)} (~${dt(v.expiresAt)})`
-      : `${tag('동의 없음', 't-bad')} <label style="display:inline-flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" id="agree"> 고객이 정보조회에 동의함</label>`;
+      : `${tag('동의 없음', 't-bad')} <label style="display:inline-flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" id="agree"> 고객이 정보조회에 동의함</label>
+         <span class="muted">— 동의 없이 고지만으로도 선심사할 수 있습니다</span>`;
   }
+  async function loadQuestionnaire() {
+    qn = null; collect = null;
+    $('disc-card').hidden = !product;
+    if (!product) return;
+    qn = await questionnaire(product.summary.id);
+    if (view !== activeView) return;
+    $('qn-title').innerHTML = `${esc(qn.title)} · v${qn.version} ${uwTypeTag(qn.simplified)}`;
+    $('disc').innerHTML = disclosureQuestions(qn);
+    collect = bindDisclosure($('disc'));
+  }
+  $('use-disc').onchange = () => { $('disc').hidden = !$('use-disc').checked; };
   await customerPicker($('cust'), params.get('customer'), async (c) => { customer = c; await refreshConsent(); });
-  await productPicker($('prod'), params.get('product'), (p) => { product = p; });
+  await productPicker($('prod'), params.get('product'), async (p) => { product = p; await loadQuestionnaire(); });
   $('run').onclick = async () => {
     $('err').hidden = true;
     try {
       if (!customer || !product) throw new Error('고객과 상품을 선택하세요.');
+      const useDisc = $('use-disc').checked;
       const agree = $('agree');
-      if (agree) {
-        if (!agree.checked) throw new Error('고객 동의를 먼저 받아야 합니다.');
+      if (agree?.checked) {
         await post(`/core/customers/${customer.id}/consents`, { type: 'PRE_UW_INQUIRY' });
         await refreshConsent();
+      } else if (agree && !useDisc) {
+        throw new Error('정보조회 동의를 받거나, 고객이 답한 고지를 입력하세요.');
       }
-      const r = await post('/core/uw/pre', { customerId: customer.id, productId: product.summary.id });
-      const c = r.uwCase;
+      const body = { customerId: customer.id, productId: product.summary.id };
+      if (useDisc) Object.assign(body, { questionnaireId: qn.id, answers: collect() });
+      const r = await post('/core/uw/pre', body);
+      const c = r.uwCase, pd = c.preDisclosure;
       $('result').innerHTML = `
-      <div class="card"><h2>예상 결과 · ${esc(c.customerName)} · ${esc(c.productName)} <span class="small muted">룰셋 v${c.ruleSetVersion}</span></h2>
-        ${table(['담보', '예상 결과', '조건', '적용 룰', '사유'], c.results.map((x) => `
-          <tr><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome)}</td>
+      <div class="card"><h2>예상 결과 · ${esc(c.customerName)} · ${esc(c.productName)} ${uwTypeTag(c.simplifiedUw)} <span class="small muted">룰셋 v${c.ruleSetVersion}</span></h2>
+        <div class="signal-box">${signalLight(c.signal, c.signalLabel)}<p class="small">${esc(r.hint)}</p></div>
+        ${table(['', '담보', '예상 결과', '조건', '적용 룰', '사유'], c.results.map((x) => `
+          <tr><td>${signalDot(x.signal)}</td><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome)}</td>
           <td class="small">${exclusionText(x.exclusions)}${x.ratingPct ? `할증 ${x.ratingPct}%` : ''}</td>
           <td>${rules(x.matchedRules)}</td><td class="small">${x.reasons.map(esc).join('<br>')}</td></tr>`))}
         <div class="actions" style="margin-top:12px"><a class="btn" href="#/design?customer=${c.customerId}&product=${product.summary.id}">이 상품으로 가입설계</a></div></div>
+      ${pd ? `<div class="card"><h2>선심사 고지 <span class="small muted">${esc(pd.questionnaire)} · 심사 케이스에 스냅샷 저장</span></h2>
+        <p>${Object.entries(pd.answers).map(([k, v]) => `${esc(k)} ${v ? tag('예', 't-bad') : tag('아니오', 't-ok')}`).join(' ')}</p>
+        ${pd.details.length ? table(['질병코드', '진단일', '치료', '완치'], pd.details.map((m) => `
+          <tr><td><span class="rule">${esc(m.kcdCode)}</span></td><td>${m.diagnosedOn}</td><td>${TREATMENT[m.treatment] || esc(m.treatment)}</td><td>${m.cured ? '예' : '아니오'}</td></tr>`)) : ''}</div>` : ''}
       <div class="card"><h2>조회된 이력 <span class="small muted">(조회 스냅샷으로 저장됨)</span></h2>
         ${table(['출처', '질병코드', '진단일', '치료', '완치'], r.inquired.map((m) => `
           <tr><td class="small">${esc(m.source)}</td><td><span class="rule">${esc(m.kcdCode)}</span></td><td>${m.diagnosedOn}</td>
-          <td>${TREATMENT[m.treatment] || esc(m.treatment)}</td><td>${m.cured ? '예' : '아니오'}</td></tr>`), '조회된 이력이 없습니다.')}</div>`;
+          <td>${TREATMENT[m.treatment] || esc(m.treatment)}</td><td>${m.cured ? '예' : '아니오'}</td></tr>`), '조회하지 않았거나 조회된 이력이 없습니다.')}</div>`;
     } catch (e) { showError($('err'), e); }
   };
 }
@@ -634,7 +717,8 @@ async function apply(params) {
     bindRows();
     return;
   }
-  const [p, qn, kcd] = await Promise.all([api(`/core/proposals/${proposalId}`), questionnaire(), kcdList()]);
+  const [p, kcd] = await Promise.all([api(`/core/proposals/${proposalId}`), kcdList()]);
+  const qn = await questionnaire(p.productId);
   if (p.status !== 'ISSUED' || p.expired) {
     view.innerHTML = `<div class="error">청약할 수 없는 설계서입니다 (${esc(p.expired ? '유효기간 만료' : p.statusLabel)}). <a href="#/proposals/${p.id}">설계서 보기</a></div>`;
     return;
@@ -645,16 +729,10 @@ async function apply(params) {
   <div class="wizard"><span class="done">설계서</span><span class="on" id="w1">1. 알릴의무 고지</span><span id="w2">2. 청약서 확인</span><span id="w3">3. 전자서명·제출</span></div>
   ${kcdDatalist(kcd)}
   <div id="step1">
-    <div class="card"><h2>계약 전 알릴의무 <span class="small muted">${esc(qn.title)} · v${qn.version}</span></h2>
-      <p class="small muted">사실대로 알리지 않으면 계약이 해지되거나 보장이 제한될 수 있습니다. "예"를 선택하면 질병·치료 내용을 입력합니다.</p>
-      ${qn.questions.map((q) => `
-      <div class="question" data-qid="${q.id}" data-detail="${q.detailRequired}">
-        <div class="q">${esc(q.code)}. ${esc(q.text)} ${q.lookbackMonths ? `<small>(최근 ${q.lookbackMonths}개월)</small>` : ''}</div>
-        <div class="yn"><label><input type="radio" name="q${q.id}" value="false" checked> 아니오</label>
-          <label><input type="radio" name="q${q.id}" value="true"> 예</label></div>
-        <div class="details"></div>
-        ${q.detailRequired ? '<button class="btn ghost sm add" hidden style="margin-top:8px">+ 상세 추가</button>' : ''}
-      </div>`).join('')}
+    <div class="card"><h2>계약 전 알릴의무 <span class="small muted">${esc(qn.title)} · v${qn.version}</span> ${uwTypeTag(qn.simplified)}</h2>
+      <p class="small muted">사실대로 알리지 않으면 계약이 해지되거나 보장이 제한될 수 있습니다. "예"를 선택하면 질병·치료 내용을 입력합니다.
+        ${qn.simplified ? '<br>간편심사형은 아래 3개 문항만 묻는 대신, 하나라도 "예"이면 간편심사형으로 가입할 수 없습니다.' : ''}</p>
+      <div id="disc">${disclosureQuestions(qn)}</div>
       <div class="actions"><button class="btn ghost" id="simulate">전산심사</button><button class="btn" id="to-doc">청약서 확인</button>
         <span class="small muted">전산심사: 입력한 고지로 심사 결과를 미리 확인합니다 (저장 안 함)</span></div>
       <div class="error" id="err1" hidden></div>
@@ -662,38 +740,7 @@ async function apply(params) {
   </div>
   <div id="step2"></div>`;
 
-  const detailRow = () => {
-    const div = document.createElement('div');
-    div.className = 'detail-row';
-    div.innerHTML = `
-      <div><label>질병코드 (KCD)</label><input class="d-kcd" list="kcd-list" placeholder="예) E11.9, K29.7"></div>
-      <div><label>진단일</label><input class="d-date" type="date" max="${today()}"></div>
-      <div><label>치료</label><select class="d-treat">${Object.entries(TREATMENT).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
-      <div><label>치료일수</label><input class="d-days" type="number" min="0" value="1"></div>
-      <div><label>완치</label><select class="d-cured"><option value="false">아니오</option><option value="true">예</option></select></div>
-      <div><button class="btn ghost sm d-del">삭제</button></div>`;
-    div.querySelector('.d-del').onclick = () => div.remove();
-    return div;
-  };
-  view.querySelectorAll('.question').forEach((qEl) => {
-    const details = qEl.querySelector('.details'), add = qEl.querySelector('.add');
-    qEl.querySelectorAll('input[type=radio]').forEach((r) => (r.onchange = () => {
-      const yes = qEl.querySelector('input[type=radio]:checked').value === 'true';
-      if (add) add.hidden = !yes;
-      if (yes && qEl.dataset.detail === 'true' && !details.children.length) details.append(detailRow());
-      if (!yes) details.innerHTML = '';
-    }));
-    if (add) add.onclick = () => details.append(detailRow());
-  });
-  const answers = () => [...view.querySelectorAll('.question')].map((qEl) => ({
-    questionId: Number(qEl.dataset.qid),
-    answer: qEl.querySelector('input[type=radio]:checked').value === 'true',
-    details: [...qEl.querySelectorAll('.detail-row')].map((d) => ({
-      kcdCode: d.querySelector('.d-kcd').value.trim(), diagnosedOn: d.querySelector('.d-date').value || null,
-      treatment: d.querySelector('.d-treat').value, treatmentDays: Number(d.querySelector('.d-days').value || 0),
-      cured: d.querySelector('.d-cured').value === 'true',
-    })),
-  }));
+  const answers = bindDisclosure($('disc'));
 
   $('simulate').onclick = async () => {
     $('err1').hidden = true;
@@ -701,8 +748,9 @@ async function apply(params) {
       const r = await post('/core/applications/underwrite-preview', { proposalId: p.id, questionnaireId: qn.id, answers: answers() });
       const cls = r.verdict.startsWith('자동') ? 't-ok' : r.verdict.startsWith('본사') ? 't-info' : r.verdict.startsWith('거절') ? 't-bad' : 't-warn';
       $('sim').innerHTML = `<h2 style="margin-top:16px">전산심사 결과 ${tag(r.verdict, cls)} <span class="small muted">룰셋 v${r.ruleSetVersion} · 저장되지 않은 사전 결과</span></h2>
-        ${table(['담보', '결과', '조건', '적용 룰', '사유'], r.coverages.map((x) => `
-          <tr><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome)}</td>
+        <div class="signal-box">${signalLight(r.signal, r.signalLabel)}</div>
+        ${table(['', '담보', '결과', '조건', '적용 룰', '사유'], r.coverages.map((x) => `
+          <tr><td>${signalDot(x.signal)}</td><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome)}</td>
           <td class="small">${exclusionText(x.exclusions)}${x.ratingPct ? `할증 ${x.ratingPct}%` : ''}</td>
           <td>${rules(x.matchedRules)}</td><td class="small">${x.reasons.map(esc).join('<br>')}</td></tr>`))}`;
     } catch (e) { showError($('err1'), e); }
@@ -780,8 +828,8 @@ async function applications() {
 }
 
 function resultsTable(results, proposal) {
-  return table(['담보', '가입금액', '보험료(표준체)', proposal ? '전산심사 제안' : '결과', '조건', '적용 룰', '사유'], results.map((x) => `
-    <tr><td>${esc(x.coverageName)}</td><td class="num">${x.insuredAmount ? amountText(x.insuredAmount) : '-'}</td><td class="num">${won(x.basePremium)}</td>
+  return table(['', '담보', '가입금액', '보험료(표준체)', proposal ? '전산심사 제안' : '결과', '조건', '적용 룰', '사유'], results.map((x) => `
+    <tr><td>${x.signal ? signalDot(x.signal) : ''}</td><td>${esc(x.coverageName)}</td><td class="num">${x.insuredAmount ? amountText(x.insuredAmount) : '-'}</td><td class="num">${won(x.basePremium)}</td>
     <td>${outcomeTag(x.outcome)}</td><td class="small">${exclusionText(x.exclusions)}${x.ratingPct ? `할증 ${x.ratingPct}%` : ''}</td>
     <td>${rules(x.matchedRules)}</td><td class="small">${(x.reasons || []).map(esc).join('<br>')}</td></tr>`));
 }
@@ -802,7 +850,8 @@ async function applicationDetail(params, id) {
   <p class="sub no-print"><a href="#/customers/${s.customerId}">${esc(s.customerName)}</a> · ${esc(s.productName)} · 제출 ${dt(s.submittedAt)}</p>
   ${s.status === 'UNDER_REVIEW' ? `<div class="notice no-print">본사 심사로 이관되었습니다. 사유: ${esc(u.referReason)} · <a href="#/uw/${u.id}">심사 화면으로</a></div>` : ''}
   ${s.status === 'ISSUED' ? `<div class="notice no-print" style="border-left-color:var(--ok)">계약이 성립되었습니다. <a href="#/customers/${s.customerId}">고객 상세에서 계약 확인</a> (15일 이내 청약철회 가능)</div>` : ''}
-  ${u ? `<div class="card no-print"><h2>심사 결과 <span class="small muted">${esc(u.stageLabel)} · ${esc(u.statusLabel)} · 룰셋 v${u.ruleSetVersion}</span></h2>${resultsTable(u.results)}</div>` : ''}
+  ${u ? `<div class="card no-print"><h2>심사 결과 <span class="small muted">${esc(u.stageLabel)} · ${esc(u.statusLabel)} · 룰셋 v${u.ruleSetVersion}</span> ${uwTypeTag(u.simplifiedUw)}</h2>
+    <div class="signal-box">${signalLight(u.signal, u.signalLabel)}</div>${resultsTable(u.results)}</div>` : ''}
   ${documentView(d.document, d.signature)}
   ${u ? `<div class="card no-print" style="margin-top:14px"><h2>심사 이력 <span class="small muted">(추가만 가능한 감사 로그)</span></h2>${logsTable(u.logs)}</div>` : ''}`;
 }

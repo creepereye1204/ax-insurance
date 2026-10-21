@@ -131,3 +131,13 @@ dl.kv dd { margin: 0; }
   main { padding: 0; }
   .doc { border: 0; }
 }
+
+/* 심사 신호등 */
+.signal { display: inline-flex; gap: 4px; padding: 4px 6px; background: var(--nav); border-radius: 999px; vertical-align: middle; }
+.lamp { display: inline-block; width: 12px; height: 12px; border-radius: 50%; opacity: .22; vertical-align: middle; }
+.lamp.red { background: #e5484d; } .lamp.yellow { background: #f5b301; } .lamp.green { background: #30a46c; }
+.lamp.on { opacity: 1; box-shadow: 0 0 6px currentColor; }
+.lamp.red.on { color: #e5484d; } .lamp.yellow.on { color: #f5b301; } .lamp.green.on { color: #30a46c; }
+.signal-box { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 4px 0 12px; }
+.signal-box p { margin: 0; color: var(--muted); flex: 1 1 260px; }
+.signal-label.s-green { color: var(--ok); } .signal-label.s-yellow { color: var(--warn); } .signal-label.s-red { color: var(--bad); }

@@ -43,6 +43,11 @@ public class UwRuleSet {
         this.active = true;
     }
 
+    /** 새 버전을 활성화하면 이전 버전은 비활성으로 남긴다 (과거 심사 재현용으로 삭제하지 않음) */
+    public void deactivate() {
+        this.active = false;
+    }
+
     public UwRuleSet add(UwRule rule) {
         rule.attachTo(this);
         rules.add(rule);

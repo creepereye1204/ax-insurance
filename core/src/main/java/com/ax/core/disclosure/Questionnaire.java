@@ -27,6 +27,16 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Questionnaire {
 
+    /** 표준 고지 (일반심사 상품) */
+    public static final String STANDARD_CODE = "STD-DISCLOSURE";
+    /** 간편고지 3-2-5 (간편심사형 상품) */
+    public static final String SIMPLIFIED_CODE = "SMP-DISCLOSURE";
+
+    /** 상품 심사 유형에 맞는 질문지 코드 */
+    public static String codeFor(boolean simplifiedUw) {
+        return simplifiedUw ? SIMPLIFIED_CODE : STANDARD_CODE;
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -52,6 +62,10 @@ public class Questionnaire {
         this.version = version;
         this.title = title;
         this.effectiveFrom = effectiveFrom;
+    }
+
+    public boolean isSimplified() {
+        return SIMPLIFIED_CODE.equals(code);
     }
 
     public Questionnaire addQuestion(String code, String text, int lookbackMonths, boolean detailRequired) {

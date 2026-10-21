@@ -33,6 +33,7 @@ public class RuleEngine {
 
     public UwResult evaluate(int ruleSetVersion, List<UwRule> rules, UwInput input) {
         List<UwRule> matched = rules.stream()
+                .filter(r -> r.scope().appliesTo(input.simplifiedUw()))
                 .filter(r -> evaluators.get(r.getCondition().source()).test(r.getCondition(), input))
                 .toList();
 

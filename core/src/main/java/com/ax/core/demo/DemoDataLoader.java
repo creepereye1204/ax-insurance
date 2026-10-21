@@ -13,7 +13,7 @@ import static com.ax.core.product.CoverageCategory.SURGERY;
 
 import com.ax.core.application.Agreement;
 import com.ax.core.application.ApplicationService;
-import com.ax.core.application.ApplicationService.AnswerInput;
+import com.ax.core.application.DisclosureForm.AnswerInput;
 import com.ax.core.application.ApplicationService.Signature;
 import com.ax.core.claim.Claim;
 import com.ax.core.claim.ClaimRepository;
@@ -28,7 +28,6 @@ import com.ax.core.customer.CustomerRepository;
 import com.ax.core.customer.Gender;
 import com.ax.core.customer.InvestmentProfile;
 import com.ax.core.disclosure.Questionnaire;
-import com.ax.core.disclosure.QuestionnaireController;
 import com.ax.core.disclosure.QuestionnaireRepository;
 import com.ax.core.external.ExternalMedicalRecord;
 import com.ax.core.external.ExternalMedicalRecordRepository;
@@ -43,6 +42,7 @@ import com.ax.core.proposal.Proposal;
 import com.ax.core.proposal.ProposalService;
 import com.ax.core.uw.rule.RuleCondition;
 import com.ax.core.uw.rule.RuleParams;
+import com.ax.core.uw.rule.RuleScope;
 import com.ax.core.uw.rule.UwAction;
 import com.ax.core.uw.rule.UwRule;
 import com.ax.core.uw.rule.UwRuleSet;
@@ -93,9 +93,16 @@ public class DemoDataLoader implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        if (!enabled || productRepository.existsByCode(ProductCatalog.SAMPLE_CODE)) {
+        if (!enabled) {
             return;
         }
+        if (!productRepository.existsByCode(ProductCatalog.SAMPLE_CODE)) {
+            loadInitial();
+        }
+        upgradeReferenceData();
+    }
+
+    private void loadInitial() {
         long started = System.currentTimeMillis();
         loadKcd();
         fundRepository.saveAll(ProductCatalog.funds());
@@ -104,11 +111,28 @@ public class DemoDataLoader implements ApplicationRunner {
         em.flush();
         int rates = generatePremiumRates();
         Questionnaire questionnaire = questionnaireRepository.save(questionnaire());
-        ruleSetRepository.save(ruleSet());
+        ruleSetRepository.save(ruleSetV1());
         em.flush();
         loadScenarioCustomers(sample, questionnaire);
         log.info("기준 데이터 적재 완료: 상품 {}개, 요율 {}행 ({}ms)", productRepository.count(), rates,
                 System.currentTimeMillis() - started);
+    }
+
+    /**
+     * 기준 데이터 변경분. 운영 DB 에도 적용되도록 이미 있으면 건너뛴다(반복 실행 안전).
+     * 룰셋은 수정하지 않고 새 버전을 만들어 활성 버전만 바꾼다 — 과거 심사 건은 그때의 버전 번호로 재현한다.
+     */
+    private void upgradeReferenceData() {
+        if (!questionnaireRepository.existsByCode(Questionnaire.SIMPLIFIED_CODE)) {
+            questionnaireRepository.save(simplifiedQuestionnaire());
+            log.info("간편고지(3-2-5) 질문지 v1 등록");
+        }
+        if (!ruleSetRepository.existsByVersion(2)) {
+            ruleSetRepository.findByActiveTrue().forEach(UwRuleSet::deactivate);
+            em.flush();
+            ruleSetRepository.save(ruleSetV2());
+            log.info("심사 룰셋 v2 활성화 (표준/간편 적용 범위 분리)");
+        }
     }
 
     /** 요율표 생성: 담보 기초요율 × 나이 증가율 × 성별 × 납입기간 계수 */
@@ -151,7 +175,7 @@ public class DemoDataLoader implements ApplicationRunner {
     }
 
     private Questionnaire questionnaire() {
-        return new Questionnaire(QuestionnaireController.STANDARD_CODE, 1, "계약 전 알릴의무 (표준, 간소화)", LocalDate.of(2026, 1, 1))
+        return new Questionnaire(Questionnaire.STANDARD_CODE, 1, "계약 전 알릴의무 (표준, 간소화)", LocalDate.of(2026, 1, 1))
                 .addQuestion("Q1", "최근 3개월 이내에 의사로부터 진찰·검사를 통해 질병 확정진단, 질병 의심소견, 치료, 입원, 수술, 투약을 받은 사실이 있습니까?", 3, true)
                 .addQuestion("Q2", "최근 1년 이내에 의사로부터 진찰·검사를 받고 그 결과 추가검사(재검사)를 받은 사실이 있습니까?", 12, true)
                 .addQuestion("Q3", "최근 5년 이내에 입원, 수술, 계속하여 7일 이상 치료, 계속하여 30일 이상 투약을 받은 사실이 있습니까?", 60, true)
@@ -159,41 +183,81 @@ public class DemoDataLoader implements ApplicationRunner {
                 .addQuestion("Q5", "현재 임신 중입니까?", 0, false);
     }
 
-    private UwRuleSet ruleSet() {
+    /** 간편고지 3-2-5: 3개월 내 입원·수술·추가검사 소견 / 2년 내 입원·수술 / 5년 내 3대 질병 */
+    private Questionnaire simplifiedQuestionnaire() {
+        return new Questionnaire(Questionnaire.SIMPLIFIED_CODE, 1, "계약 전 알릴의무 (간편고지 3-2-5)", LocalDate.of(2026, 1, 1))
+                .addQuestion("S1", "최근 3개월 이내에 의사로부터 입원, 수술(제왕절개 포함), 추가검사(재검사)가 필요하다는 소견을 받은 사실이 있습니까?", 3, true)
+                .addQuestion("S2", "최근 2년 이내에 질병이나 사고로 입원 또는 수술(제왕절개 포함)을 받은 사실이 있습니까?", 24, true)
+                .addQuestion("S3", "최근 5년 이내에 암, 뇌졸중, 심근경색으로 진단, 입원 또는 수술을 받은 사실이 있습니까?", 60, true);
+    }
+
+    private UwRuleSet ruleSetV1() {
+        UwRuleSet set = new UwRuleSet(1, "데모 심사 기준 (가상)");
+        standardRules(RuleScope.ALL).forEach(set::add);
+        return set;
+    }
+
+    /**
+     * v2: 표준 심사 룰은 일반심사 상품에만, 간편고지 룰은 간편심사형 상품에만 적용한다.
+     * 간편고지 룰은 고지 응답과 함께 의료 이력(고지 상세·선심사 조회 이력)도 본다 —
+     * 선심사 때 조회 이력만으로 "간편고지 해당 가능성"을 미리 알려 주기 위해서다.
+     */
+    private UwRuleSet ruleSetV2() {
+        List<String> major = List.of("C*", "I21*", "I22*", "I60*", "I61*", "I62*", "I63*", "I64*");
+        List<TreatmentType> admitted = List.of(INPATIENT, TreatmentType.SURGERY);
+        UwRuleSet set = new UwRuleSet(2, "데모 심사 기준 (가상) — 간편심사형 3-2-5 분리");
+        set.add(new UwRule("R-SMP-01", "간편고지 1 해당", 10, RuleCondition.answer("S1"), List.of(), UwAction.DECLINE,
+                        RuleParams.reason("간편고지 1(3개월 내 입원·수술·추가검사 소견) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED))
+                .add(new UwRule("R-SMP-02", "간편고지 2 해당", 11, RuleCondition.answer("S2"), List.of(), UwAction.DECLINE,
+                        RuleParams.reason("간편고지 2(2년 내 입원·수술) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED))
+                .add(new UwRule("R-SMP-03", "간편고지 3 해당", 12, RuleCondition.answer("S3"), List.of(), UwAction.DECLINE,
+                        RuleParams.reason("간편고지 3(5년 내 암·뇌졸중·심근경색) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED))
+                .add(new UwRule("R-SMP-11", "3개월 내 입원·수술 이력", 13, RuleCondition.medical(List.of("*"), 3, admitted, null),
+                        List.of(), UwAction.DECLINE, RuleParams.reason("3개월 내 입원·수술 이력 — 간편고지 1 해당"), RuleScope.SIMPLIFIED))
+                .add(new UwRule("R-SMP-12", "2년 내 입원·수술 이력", 14, RuleCondition.medical(List.of("*"), 24, admitted, null),
+                        List.of(), UwAction.DECLINE, RuleParams.reason("2년 내 입원·수술 이력 — 간편고지 2 해당"), RuleScope.SIMPLIFIED))
+                .add(new UwRule("R-SMP-13", "5년 내 3대 질병 이력", 15, RuleCondition.medical(major, 60, null, null),
+                        List.of(), UwAction.DECLINE, RuleParams.reason("5년 내 암·뇌졸중·심근경색 이력 — 간편고지 3 해당"), RuleScope.SIMPLIFIED));
+        standardRules(RuleScope.STANDARD).forEach(set::add);
+        return set;
+    }
+
+    /** 표준 심사 룰. 잦은 청구·고위험 직업은 심사 유형과 무관하므로 항상 전체 적용 */
+    private List<UwRule> standardRules(RuleScope medical) {
         List<String> diabetes = List.of("E10*", "E11*", "E12*", "E13*", "E14*");
         List<String> stomach = List.of("K25*", "K26*", "K29*");
         List<String> fracture = List.of("S42*", "S52*", "S82*");
-        return new UwRuleSet(1, "데모 심사 기준 (가상)")
-                .add(new UwRule("R-RCT-01", "최근 입원·수술 치료 중", 20,
+        return List.of(
+                new UwRule("R-RCT-01", "최근 입원·수술 치료 중", 20,
                         RuleCondition.medical(List.of("*"), 3, List.of(INPATIENT, TreatmentType.SURGERY), false), List.of(),
-                        UwAction.POSTPONE, RuleParams.reason("최근 3개월 내 입원·수술 후 치료 중 — 치료 종결 후 재청약")))
-                .add(new UwRule("R-CA-01", "암 병력 — 암진단", 30, RuleCondition.medical(List.of("C*"), 60, null, null),
-                        List.of(CANCER), UwAction.DECLINE, RuleParams.reason("5년 내 암 병력 — 암진단 담보 인수 불가")))
-                .add(new UwRule("R-CA-02", "암 병력 — 기타 담보", 31, RuleCondition.medical(List.of("C*"), 60, null, null),
-                        List.of(DEATH, MEDICAL, SURGERY, HOSPITAL, CI), UwAction.REFER, RuleParams.reason("5년 내 암 병력 — 본사 심사")))
-                .add(new UwRule("R-DM-01", "당뇨 치료 이력", 40,
+                        UwAction.POSTPONE, RuleParams.reason("최근 3개월 내 입원·수술 후 치료 중 — 치료 종결 후 재청약"), medical),
+                new UwRule("R-CA-01", "암 병력 — 암진단", 30, RuleCondition.medical(List.of("C*"), 60, null, null),
+                        List.of(CANCER), UwAction.DECLINE, RuleParams.reason("5년 내 암 병력 — 암진단 담보 인수 불가"), medical),
+                new UwRule("R-CA-02", "암 병력 — 기타 담보", 31, RuleCondition.medical(List.of("C*"), 60, null, null),
+                        List.of(DEATH, MEDICAL, SURGERY, HOSPITAL, CI), UwAction.REFER, RuleParams.reason("5년 내 암 병력 — 본사 심사"), medical),
+                new UwRule("R-DM-01", "당뇨 치료 이력", 40,
                         RuleCondition.medical(diabetes, 60, List.of(MEDICATION, INPATIENT), null), List.of(),
-                        UwAction.REFER, RuleParams.reason("당뇨 치료 이력 — 합병증·혈당 관리 상태 확인 필요")))
-                .add(new UwRule("R-ADD-01", "추가검사 이력", 45, RuleCondition.answer("Q2"), List.of(),
-                        UwAction.REFER, RuleParams.reason("1년 내 추가검사(재검사) — 검사 결과 확인 필요")))
-                .add(new UwRule("R-HT-01", "고혈압 투약", 50,
+                        UwAction.REFER, RuleParams.reason("당뇨 치료 이력 — 합병증·혈당 관리 상태 확인 필요"), medical),
+                new UwRule("R-ADD-01", "추가검사 이력", 45, RuleCondition.answer("Q2"), List.of(),
+                        UwAction.REFER, RuleParams.reason("1년 내 추가검사(재검사) — 검사 결과 확인 필요"), medical),
+                new UwRule("R-HT-01", "고혈압 투약", 50,
                         RuleCondition.medical(List.of("I10*"), 60, List.of(MEDICATION, OUTPATIENT), null), List.of(SURGERY, CI),
-                        UwAction.RATING, RuleParams.rating("고혈압 투약 — 수술비·뇌심장 진단 할증", 20)))
-                .add(new UwRule("R-GI-01", "위·십이지장 질환 치료 중", 60,
+                        UwAction.RATING, RuleParams.rating("고혈압 투약 — 수술비·뇌심장 진단 할증", 20), medical),
+                new UwRule("R-GI-01", "위·십이지장 질환 치료 중", 60,
                         RuleCondition.medical(stomach, 12, null, false), List.of(MEDICAL, SURGERY, HOSPITAL), UwAction.EXCLUSION,
-                        RuleParams.exclusion("1년 내 위·십이지장 질환 치료 중", "위·십이지장", stomach, 24)))
-                .add(new UwRule("R-GI-02", "위염 완치", 61,
+                        RuleParams.exclusion("1년 내 위·십이지장 질환 치료 중", "위·십이지장", stomach, 24), medical),
+                new UwRule("R-GI-02", "위염 완치", 61,
                         RuleCondition.medical(List.of("K29*"), 60, null, true), List.of(),
-                        UwAction.STANDARD, RuleParams.reason("위염 완치 — 표준체")))
-                .add(new UwRule("R-FX-01", "골절 치료 중", 70,
+                        UwAction.STANDARD, RuleParams.reason("위염 완치 — 표준체"), medical),
+                new UwRule("R-FX-01", "골절 치료 중", 70,
                         RuleCondition.medical(fracture, 12, null, false), List.of(MEDICAL, SURGERY, HOSPITAL, ACCIDENT),
-                        UwAction.EXCLUSION, RuleParams.exclusion("1년 내 골절 치료 중", "골절 부위", fracture, 12)))
-                .add(new UwRule("R-PRG-01", "임신 중", 80, RuleCondition.answer("Q5"), List.of(MEDICAL, SURGERY, HOSPITAL),
-                        UwAction.EXCLUSION, RuleParams.exclusion("임신 중", "임신·출산", List.of("O*"), 12)))
-                .add(new UwRule("R-CLM-01", "잦은 보험금 청구", 90, RuleCondition.claimCount(12, 3), List.of(MEDICAL, HOSPITAL),
-                        UwAction.REFER, RuleParams.reason("최근 1년 보험금 청구 3회 이상")))
-                .add(new UwRule("R-JOB-01", "고위험 직업", 95, RuleCondition.jobRisk(3), List.of(ACCIDENT, DEATH),
-                        UwAction.RATING, RuleParams.rating("고위험 직업(3등급) — 상해·사망 할증", 50)));
+                        UwAction.EXCLUSION, RuleParams.exclusion("1년 내 골절 치료 중", "골절 부위", fracture, 12), medical),
+                new UwRule("R-PRG-01", "임신 중", 80, RuleCondition.answer("Q5"), List.of(MEDICAL, SURGERY, HOSPITAL),
+                        UwAction.EXCLUSION, RuleParams.exclusion("임신 중", "임신·출산", List.of("O*"), 12), medical),
+                new UwRule("R-CLM-01", "잦은 보험금 청구", 90, RuleCondition.claimCount(12, 3), List.of(MEDICAL, HOSPITAL),
+                        UwAction.REFER, RuleParams.reason("최근 1년 보험금 청구 3회 이상"), RuleScope.ALL),
+                new UwRule("R-JOB-01", "고위험 직업", 95, RuleCondition.jobRisk(3), List.of(ACCIDENT, DEATH),
+                        UwAction.RATING, RuleParams.rating("고위험 직업(3등급) — 상해·사망 할증", 50), RuleScope.ALL));
     }
 
     // ------------------------------------------------------------------ 시나리오 고객 (docs/scenarios.md)

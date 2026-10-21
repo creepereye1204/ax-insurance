@@ -64,12 +64,24 @@ def design(cust, prod, term, amounts=None, contribution=None, annuity_age=None, 
         "unsuitableAcknowledged": ack})
 
 
-def apply(proposal, cust, yes=None, agreements=None):
+def questionnaire(product_id):
+    """상품 심사 유형에 맞는 질문지 (일반심사 → 표준, 간편심사형 → 간편고지 3-2-5)"""
+    return call("GET", f"/questionnaires/current?productId={product_id}")
+
+
+def answers_of(qn, yes=None):
     """yes: {문항코드: [상세...]} — 나머지 문항은 '아니오'"""
-    qn = call("GET", "/questionnaires/current")
     yes = yes or {}
-    answers = [{"questionId": q["id"], "answer": q["code"] in yes, "details": yes.get(q["code"], [])}
-               for q in qn["questions"]]
+    return [{"questionId": q["id"], "answer": q["code"] in yes, "details": yes.get(q["code"], [])} for q in qn["questions"]]
+
+
+def days_ago(n):
+    return time.strftime("%Y-%m-%d", time.localtime(time.time() - n * 86400))
+
+
+def apply(proposal, cust, yes=None, agreements=None):
+    qn = questionnaire(proposal["productId"])
+    answers = answers_of(qn, yes)
     doc = call("POST", "/applications/preview", {"proposalId": proposal["id"], "questionnaireId": qn["id"], "answers": answers})
     required = [a["code"] for a in doc["requiredAgreements"]]
     return doc, call("POST", "/applications", {
@@ -291,7 +303,7 @@ def _():
 def _():
     c = customer("김정상")
     p = design(c, product("CANCER", lambda x: not x["simplifiedUw"]), 20)
-    qn = call("GET", "/questionnaires/current")
+    qn = questionnaire(p["productId"])
     no = [{"questionId": q["id"], "answer": False, "details": []} for q in qn["questions"]]
     bad = [dict(a, answer=(a["questionId"] == qn["questions"][3]["id"])) for a in no]
     for body, expect in [
@@ -328,21 +340,69 @@ def _():
 
 @scenario("S15 전산심사 사전 실행: 김정상 자동 승인 예상 / 박당뇨 당뇨 고지 시 본사 이관 예상 (저장 안 됨)")
 def _():
-    qn = call("GET", "/questionnaires/current")
     def simulate(cust, yes=None):
         prod = product("HEALTH", lambda x: not x["simplifiedUw"])
         p = design(cust, prod, 20)
-        yes = yes or {}
-        answers = [{"questionId": q["id"], "answer": q["code"] in yes, "details": yes.get(q["code"], [])} for q in qn["questions"]]
+        qn = questionnaire(prod["summary"]["id"])
+        answers = answers_of(qn, yes)
         return p, call("POST", "/applications/underwrite-preview",
                        {"proposalId": p["id"], "questionnaireId": qn["id"], "answers": answers})
     _, ok = simulate(customer("김정상"))
-    assert ok["verdict"] == "자동 승인 예상", ok["verdict"]
+    assert ok["verdict"] == "자동 승인 예상" and ok["signal"] == "GREEN", (ok["verdict"], ok["signal"])
     p, ref = simulate(customer("박당뇨"), {"Q4": [{"kcdCode": "E11.9", "diagnosedOn": "2024-01-01", "treatment": "MEDICATION",
                                                  "treatmentDays": 300, "cured": False}]})
-    assert ref["verdict"] == "본사 이관 예상", ref["verdict"]
+    assert ref["verdict"] == "본사 이관 예상" and ref["signal"] == "YELLOW", (ref["verdict"], ref["signal"])
     assert call("GET", f"/proposals/{p['id']}")["status"] == "ISSUED", "사전 실행이 설계서를 전환함"
     return "자동 승인 예상 / 본사 이관 예상"
+
+
+@scenario("S17 박당뇨: 고지 기반 선심사 — 표준 종신 노랑(본사 심사) / 간편심사형 종신 초록, 질문지 혼용 불가")
+def _():
+    c = customer("박당뇨")
+    dm = [{"kcdCode": "E11.9", "diagnosedOn": days_ago(3 * 365), "treatment": "MEDICATION", "treatmentDays": 300, "cured": False}]
+    std = product("WHOLE_LIFE", lambda x: not x["simplifiedUw"] and x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"])
+    std_qn = questionnaire(std["summary"]["id"])
+    assert not std_qn["simplified"] and len(std_qn["questions"]) == 5, std_qn["code"]
+    r = call("POST", "/uw/pre", {"customerId": c["id"], "productId": std["summary"]["id"], "questionnaireId": std_qn["id"],
+                                 "answers": answers_of(std_qn, {"Q4": dm})})
+    assert r["uwCase"]["signal"] == "YELLOW", r["uwCase"]["signal"]
+    assert "간편심사형" in r["hint"], r["hint"]
+    assert r["uwCase"]["preDisclosure"]["answers"]["Q4"] is True
+
+    smp = product("WHOLE_LIFE", lambda x: x["simplifiedUw"] and x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"])
+    smp_qn = questionnaire(smp["summary"]["id"])
+    assert smp_qn["simplified"] and [q["code"] for q in smp_qn["questions"]] == ["S1", "S2", "S3"], smp_qn["code"]
+    r = call("POST", "/uw/pre", {"customerId": c["id"], "productId": smp["summary"]["id"], "questionnaireId": smp_qn["id"],
+                                 "answers": answers_of(smp_qn)})
+    assert r["uwCase"]["signal"] == "GREEN", [(x["coverageName"], x["matchedRules"]) for x in r["uwCase"]["results"]]
+    try:
+        call("POST", "/uw/pre", {"customerId": c["id"], "productId": smp["summary"]["id"], "questionnaireId": std_qn["id"],
+                                 "answers": answers_of(std_qn)})
+        raise AssertionError("간편심사형 상품에 표준 질문지가 허용됨")
+    except ApiError as e:
+        assert "간편고지" in str(e.detail), e.detail
+    p = design(c, smp, 20)
+    _, d = apply(p, c)
+    d = issued(d)
+    return "표준 노랑 → 간편 초록 → 간편심사형 계약 성립"
+
+
+@scenario("S18 한골절: 간편심사형 — 동의 조회만으로 빨강(2년 내 수술), 고지 없이도 근거 없으면 오류")
+def _():
+    c = customer("한골절")
+    smp = product("HEALTH", lambda x: x["simplifiedUw"] and x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"]) \
+        if any(x["simplifiedUw"] for x in call("GET", "/products?type=HEALTH&size=100")["content"]) \
+        else product("WHOLE_LIFE", lambda x: x["simplifiedUw"] and x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"])
+    call("POST", f"/customers/{c['id']}/consents", {"type": "PRE_UW_INQUIRY"})
+    r = call("POST", "/uw/pre", {"customerId": c["id"], "productId": smp["summary"]["id"]})
+    rules = {rule for x in r["uwCase"]["results"] for rule in x["matchedRules"]}
+    assert r["uwCase"]["signal"] == "RED" and "R-SMP-12" in rules, (r["uwCase"]["signal"], rules)
+    qn = questionnaire(smp["summary"]["id"])
+    r = call("POST", "/uw/pre", {"customerId": c["id"], "productId": smp["summary"]["id"], "questionnaireId": qn["id"],
+                                 "answers": answers_of(qn, {"S2": [{"kcdCode": "S82.2", "diagnosedOn": days_ago(180),
+                                                                   "treatment": "SURGERY", "treatmentDays": 10, "cured": False}]})})
+    assert r["uwCase"]["signal"] == "RED" and "R-SMP-02" in {x for y in r["uwCase"]["results"] for x in y["matchedRules"]}
+    return "조회 이력 R-SMP-12 빨강, 고지 S2 빨강"
 
 
 if __name__ == "__main__":

@@ -14,10 +14,12 @@ import com.ax.core.common.TreatmentType;
 import com.ax.core.uw.engine.CoverageOutcome;
 import com.ax.core.uw.engine.MedicalRecord;
 import com.ax.core.uw.engine.RuleEngine;
+import com.ax.core.uw.engine.Signal;
 import com.ax.core.uw.engine.UwInput;
 import com.ax.core.uw.engine.UwResult;
 import com.ax.core.uw.rule.RuleCondition;
 import com.ax.core.uw.rule.RuleParams;
+import com.ax.core.uw.rule.RuleScope;
 import com.ax.core.uw.rule.UwAction;
 import com.ax.core.uw.rule.UwRule;
 import java.time.LocalDate;
@@ -54,7 +56,7 @@ class RuleEngineTest {
     }
 
     UwResult run(int age, Map<String, Boolean> answers, List<MedicalRecord> records, List<LocalDate> claims) {
-        return engine.evaluate(1, rules, new UwInput(TODAY, age, 1, answers, records, claims, List.of(MEDICAL, SURGERY, CANCER)));
+        return engine.evaluate(1, rules, new UwInput(TODAY, age, 1, false, answers, records, claims, List.of(MEDICAL, SURGERY, CANCER)));
     }
 
     @Test
@@ -68,14 +70,14 @@ class RuleEngineTest {
         var jobRule = new UwRule("R-JOB-01", "", 95, RuleCondition.jobRisk(3), List.of(ACCIDENT),
                 UwAction.RATING, RuleParams.rating("직업", 50));
         UwResult r = engine.evaluate(1, List.of(jobRule),
-                new UwInput(TODAY, 35, 3, Map.of(), List.of(), List.of(), List.of(ACCIDENT, MEDICAL)));
+                new UwInput(TODAY, 35, 3, false, Map.of(), List.of(), List.of(), List.of(ACCIDENT, MEDICAL)));
         assertThat(r.decisions().get(ACCIDENT).ratingPct()).isEqualTo(50);
         assertThat(r.decisions().get(MEDICAL).outcome()).isEqualTo(CoverageOutcome.STANDARD);
     }
 
     @Test
     void 적립_담보는_병력이_있어도_심사하지_않는다() {
-        UwResult r = engine.evaluate(1, rules, new UwInput(TODAY, 70, 1, Map.of(),
+        UwResult r = engine.evaluate(1, rules, new UwInput(TODAY, 70, 1, false, Map.of(),
                 List.of(record("C16.9", TODAY.minusYears(1), INPATIENT, false)), List.of(), List.of(ANNUITY)));
         assertThat(r.decisions().get(ANNUITY).outcome()).isEqualTo(CoverageOutcome.STANDARD);
         assertThat(r.decisions().get(ANNUITY).matchedRules()).isEmpty();
@@ -150,5 +152,65 @@ class RuleEngineTest {
                 List.of(TODAY.minusMonths(1), TODAY.minusMonths(4), TODAY.minusMonths(11), TODAY.minusMonths(20)));
         assertThat(r.decisions().get(MEDICAL).outcome()).isEqualTo(CoverageOutcome.REFER);
         assertThat(r.decisions().get(SURGERY).outcome()).isEqualTo(CoverageOutcome.STANDARD);
+    }
+
+    // ---------------------------------------------------------------- 표준 / 간편(3-2-5) 적용 범위
+
+    final List<UwRule> scoped = List.of(
+            new UwRule("R-SMP-02", "", 11, RuleCondition.answer("S2"), List.of(), UwAction.DECLINE,
+                    RuleParams.reason("간편 2"), RuleScope.SIMPLIFIED),
+            new UwRule("R-SMP-12", "", 14, RuleCondition.medical(List.of("*"), 24, List.of(INPATIENT, TreatmentType.SURGERY), null),
+                    List.of(), UwAction.DECLINE, RuleParams.reason("2년 내 입원·수술"), RuleScope.SIMPLIFIED),
+            new UwRule("R-DM-01", "", 40, RuleCondition.medical(List.of("E11*"), 60, List.of(MEDICATION, INPATIENT), null),
+                    List.of(), UwAction.REFER, RuleParams.reason("당뇨"), RuleScope.STANDARD),
+            new UwRule("R-CLM-01", "", 90, RuleCondition.claimCount(12, 3), List.of(MEDICAL),
+                    UwAction.REFER, RuleParams.reason("청구"), RuleScope.ALL));
+
+    UwResult runScoped(boolean simplified, Map<String, Boolean> answers, List<MedicalRecord> records, List<LocalDate> claims) {
+        return engine.evaluate(2, scoped, new UwInput(TODAY, 50, 1, simplified, answers, records, claims, List.of(MEDICAL, SURGERY)));
+    }
+
+    @Test
+    void 당뇨_투약은_표준심사만_본사이관_간편심사는_표준체() {
+        var diabetes = List.of(record("E11.9", TODAY.minusYears(3), MEDICATION, false));
+        assertThat(runScoped(false, Map.of(), diabetes, List.of()).anyReferred()).isTrue();
+        UwResult simplified = runScoped(true, Map.of("S1", false, "S2", false, "S3", false), diabetes, List.of());
+        assertThat(simplified.decisions().values()).allMatch(d -> d.outcome() == CoverageOutcome.STANDARD);
+        assertThat(simplified.signal()).isEqualTo(Signal.GREEN);
+    }
+
+    @Test
+    void 간편고지_예는_전_담보_거절_빨강() {
+        UwResult r = runScoped(true, Map.of("S2", true), List.of(), List.of());
+        assertThat(r.allDeclined()).isTrue();
+        assertThat(r.signal()).isEqualTo(Signal.RED);
+        assertThat(r.matchedRules()).containsExactly("R-SMP-02");
+    }
+
+    @Test
+    void 간편고지를_아니오로_답해도_조회된_2년내_수술_이력이면_거절() {
+        var surgery = List.of(new MedicalRecord("외부:타사", "S82.2", TODAY.minusMonths(6), TreatmentType.SURGERY, false));
+        UwResult r = runScoped(true, Map.of("S2", false), surgery, List.of());
+        assertThat(r.allDeclined()).isTrue();
+        assertThat(r.matchedRules()).containsExactly("R-SMP-12");
+    }
+
+    @Test
+    void 잦은_청구_룰은_간편심사에도_적용_노랑() {
+        var claims = List.of(TODAY.minusMonths(1), TODAY.minusMonths(2), TODAY.minusMonths(3));
+        UwResult r = runScoped(true, Map.of(), List.of(), claims);
+        assertThat(r.decisions().get(MEDICAL).outcome()).isEqualTo(CoverageOutcome.REFER);
+        assertThat(r.decisions().get(SURGERY).outcome()).isEqualTo(CoverageOutcome.STANDARD);
+        assertThat(r.signal()).isEqualTo(Signal.YELLOW);
+    }
+
+    @Test
+    void 신호등_전체판정은_청약_처리흐름과_같다() {
+        assertThat(Signal.overall(List.of(CoverageOutcome.STANDARD, CoverageOutcome.STANDARD))).isEqualTo(Signal.GREEN);
+        // 일부 담보 거절은 나머지 담보로 인수 → 노랑
+        assertThat(Signal.overall(List.of(CoverageOutcome.STANDARD, CoverageOutcome.DECLINE))).isEqualTo(Signal.YELLOW);
+        // 한 담보라도 연기면 청약 전체 연기 → 빨강
+        assertThat(Signal.overall(List.of(CoverageOutcome.STANDARD, CoverageOutcome.POSTPONE))).isEqualTo(Signal.RED);
+        assertThat(Signal.overall(List.of(CoverageOutcome.DECLINE, CoverageOutcome.DECLINE))).isEqualTo(Signal.RED);
     }
 }

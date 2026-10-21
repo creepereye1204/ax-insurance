@@ -1,13 +1,11 @@
 package com.ax.core.application;
 
+import com.ax.core.application.DisclosureForm.AnswerInput;
 import com.ax.core.common.BusinessException;
 import com.ax.core.common.NotFoundException;
-import com.ax.core.common.TreatmentType;
 import com.ax.core.customer.Customer;
-import com.ax.core.disclosure.Question;
 import com.ax.core.disclosure.Questionnaire;
 import com.ax.core.disclosure.QuestionnaireRepository;
-import com.ax.core.kcd.KcdRepository;
 import com.ax.core.proposal.Proposal;
 import com.ax.core.proposal.ProposalCoverage;
 import com.ax.core.proposal.ProposalRepository;
@@ -22,9 +20,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -41,14 +37,8 @@ public class ApplicationService {
     private final ApplicationRepository applicationRepository;
     private final ProposalRepository proposalRepository;
     private final QuestionnaireRepository questionnaireRepository;
-    private final KcdRepository kcdRepository;
+    private final DisclosureForm disclosureForm;
     private final UwService uwService;
-
-    public record DetailInput(String kcdCode, LocalDate diagnosedOn, TreatmentType treatment, int treatmentDays, boolean cured) {
-    }
-
-    public record AnswerInput(Long questionId, boolean answer, List<DetailInput> details) {
-    }
 
     public record Signature(String signerName, List<Agreement> agreements) {
     }
@@ -105,6 +95,7 @@ public class ApplicationService {
         }
         Questionnaire questionnaire = questionnaireRepository.findById(questionnaireId)
                 .orElseThrow(() -> new NotFoundException("질문지", questionnaireId));
+        disclosureForm.checkFor(questionnaire, proposal.getProduct());
         Customer customer = proposal.getCustomer();
         if (!proposal.getProduct().acceptsAge(customer.insuranceAgeAt(now.toLocalDate()))) {
             throw new BusinessException("설계 이후 나이가 바뀌어 가입 가능 나이를 벗어났습니다. 다시 설계하세요.");
@@ -116,53 +107,9 @@ public class ApplicationService {
                     ? proposal.getMonthlyContribution() : pc.getMonthlyPremium();
             app.addCoverage(new ApplicationCoverage(pc.getCoverage(), pc.getInsuredAmount(), base));
         }
-        addAnswers(app, questionnaire, answers, now.toLocalDate());
+        disclosureForm.build(questionnaire, answers, now.toLocalDate()).forEach(app::addAnswer);
         List<Agreement> required = Agreement.requiredFor(customer, proposal.getProduct(), now.toLocalDate());
         return new Draft(app, required, hash(app));
-    }
-
-    /** 모든 문항에 답해야 하고, "예"인 상세 필요 문항은 상세가 1건 이상, 진단일은 문항의 조회기간 안이어야 한다. */
-    private void addAnswers(Application app, Questionnaire questionnaire, List<AnswerInput> inputs, LocalDate today) {
-        Map<Long, AnswerInput> byQuestion = inputs == null ? Map.of()
-                : inputs.stream().collect(Collectors.toMap(AnswerInput::questionId, Function.identity(), (a, b) -> a));
-
-        for (Question q : questionnaire.getQuestions()) {
-            AnswerInput in = byQuestion.get(q.getId());
-            if (in == null) {
-                throw new BusinessException("고지 문항 " + q.getCode() + "에 답하지 않았습니다.");
-            }
-            DisclosureAnswer answer = new DisclosureAnswer(q, in.answer());
-            List<DetailInput> details = in.details() == null ? List.of() : in.details();
-            if (in.answer() && q.isDetailRequired() && details.isEmpty()) {
-                throw new BusinessException(q.getCode() + " '예' 응답에는 질병·치료 상세를 1건 이상 입력해야 합니다.");
-            }
-            if (in.answer()) {
-                for (DetailInput d : details) {
-                    validateDetail(q, d, today);
-                    answer.addDetail(new DisclosureDetail(d.kcdCode().trim().toUpperCase(), d.diagnosedOn(),
-                            d.treatment(), d.treatmentDays(), d.cured()));
-                }
-            }
-            app.addAnswer(answer);
-        }
-    }
-
-    private void validateDetail(Question q, DetailInput d, LocalDate today) {
-        if (d.kcdCode() == null || d.kcdCode().isBlank()) {
-            throw new BusinessException(q.getCode() + ": 질병코드(KCD)를 입력하세요.");
-        }
-        if (!kcdRepository.existsById(d.kcdCode().trim().toUpperCase())) {
-            throw new BusinessException(q.getCode() + ": 등록되지 않은 질병코드입니다 (" + d.kcdCode() + ")");
-        }
-        if (d.diagnosedOn() == null || d.diagnosedOn().isAfter(today)) {
-            throw new BusinessException(q.getCode() + ": 진단일이 올바르지 않습니다.");
-        }
-        if (q.getLookbackMonths() > 0 && d.diagnosedOn().isBefore(today.minusMonths(q.getLookbackMonths()))) {
-            throw new BusinessException(q.getCode() + ": 진단일이 고지 대상 기간(최근 " + q.getLookbackMonths() + "개월)을 벗어납니다.");
-        }
-        if (d.treatment() == null || d.treatmentDays() < 0) {
-            throw new BusinessException(q.getCode() + ": 치료 유형·일수를 확인하세요.");
-        }
     }
 
     /** 청약서 핵심 내용(설계·보험료·고지)의 해시. 서명 시점 내용을 증빙한다. */

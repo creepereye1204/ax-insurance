@@ -23,6 +23,8 @@ import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * 심사 케이스. 선심사는 고객 단위(청약 없음), 전산/본사심사는 청약 단위.
@@ -67,6 +69,10 @@ public class UwCase extends BaseTimeEntity {
     @Column(columnDefinition = "text")
     private String aiOpinion;
 
+    /** 고지 기반 선심사의 고지 스냅샷 (조회만 한 선심사·전산심사는 null) */
+    @JdbcTypeCode(SqlTypes.JSON)
+    private PreDisclosure preDisclosure;
+
     @OneToMany(mappedBy = "uwCase", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id")
     private List<UwCoverageResult> results = new ArrayList<>();
@@ -106,6 +112,10 @@ public class UwCase extends BaseTimeEntity {
             throw new BusinessException("본사 심사 대기 건이 아닙니다.");
         }
         this.status = UwCaseStatus.COMPLETED;
+    }
+
+    public void recordPreDisclosure(PreDisclosure disclosure) {
+        this.preDisclosure = disclosure;
     }
 
     public void writeAiOpinion(String opinion) {

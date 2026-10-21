@@ -61,8 +61,18 @@ public class UwRule {
     @Column(nullable = false)
     private RuleParams params;
 
+    /** 적용 범위 (룰셋 v1 은 컬럼 추가 전이라 null → 전체) */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private RuleScope scope;
+
     public UwRule(String code, String name, int priority, RuleCondition condition,
                   List<CoverageCategory> categories, UwAction action, RuleParams params) {
+        this(code, name, priority, condition, categories, action, params, RuleScope.ALL);
+    }
+
+    public UwRule(String code, String name, int priority, RuleCondition condition,
+                  List<CoverageCategory> categories, UwAction action, RuleParams params, RuleScope scope) {
         this.code = code;
         this.name = name;
         this.priority = priority;
@@ -70,10 +80,15 @@ public class UwRule {
         this.categories = categories;
         this.action = action;
         this.params = params;
+        this.scope = scope;
     }
 
     void attachTo(UwRuleSet ruleSet) {
         this.ruleSet = ruleSet;
+    }
+
+    public RuleScope scope() {
+        return scope == null ? RuleScope.ALL : scope;
     }
 
     public boolean appliesTo(CoverageCategory category) {

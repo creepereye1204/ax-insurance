@@ -18,6 +18,10 @@ public record UwResult(int ruleSetVersion, Map<CoverageCategory, CoverageDecisio
         return decisions.values().stream().allMatch(d -> d.outcome() == CoverageOutcome.DECLINE);
     }
 
+    public Signal signal() {
+        return Signal.overall(decisions.values().stream().map(CoverageDecision::outcome).toList());
+    }
+
     public List<String> matchedRules() {
         return decisions.values().stream().flatMap(d -> d.matchedRules().stream()).distinct().sorted().toList();
     }
