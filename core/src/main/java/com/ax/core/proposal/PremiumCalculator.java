@@ -5,11 +5,13 @@ import com.ax.core.customer.ConsumerType;
 import com.ax.core.customer.Customer;
 import com.ax.core.customer.InvestmentProfile;
 import com.ax.core.product.Coverage;
+import com.ax.core.product.CoverageRuleRepository;
 import com.ax.core.product.Fund;
 import com.ax.core.product.FundRepository;
 import com.ax.core.product.PremiumConversion;
 import com.ax.core.product.PremiumRateRepository;
 import com.ax.core.product.Product;
+import com.ax.core.product.RiderRules;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -37,6 +39,7 @@ public class PremiumCalculator {
 
     private final PremiumRateRepository rateRepository;
     private final FundRepository fundRepository;
+    private final CoverageRuleRepository ruleRepository;
 
     public record CoverageAmount(Long coverageId, long amount) {
     }
@@ -79,6 +82,7 @@ public class PremiumCalculator {
         }
 
         List<CoverageQuote> quotes = quoteCoverages(product, customer, age, in);
+        checkRiderRules(product, quotes);
         long premium = quotes.stream().mapToLong(CoverageQuote::monthlyPremium).sum();
 
         Illustration illustration = null;
@@ -163,6 +167,16 @@ public class PremiumCalculator {
             result.add(new CoverageQuote(c, amount, Math.max(premium, 10)));
         }
         return result;
+    }
+
+    /** 특약 연관 규칙 (필수 동반 가입 · 동시 가입 불가 · 가입금액 비율 한도) */
+    private void checkRiderRules(Product product, List<CoverageQuote> quotes) {
+        Map<Long, Long> amounts = quotes.stream().filter(q -> !q.coverage().isAccumulation())
+                .collect(Collectors.toMap(q -> q.coverage().getId(), CoverageQuote::amount));
+        List<String> violations = RiderRules.violations(ruleRepository.specsOf(product.getId()), amounts);
+        if (!violations.isEmpty()) {
+            throw new BusinessException(String.join(" / ", violations));
+        }
     }
 
     private static long validContribution(Product product, Long contribution) {

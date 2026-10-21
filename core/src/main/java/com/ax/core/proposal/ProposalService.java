@@ -22,6 +22,7 @@ public class ProposalService {
     private final ProposalRepository proposalRepository;
     private final CustomerRepository customerRepository;
     private final ProductRepository productRepository;
+    private final ProposalDraftRepository draftRepository;
 
     /** 보험료 계산만 (저장하지 않음) */
     @Transactional(readOnly = true)
@@ -37,6 +38,8 @@ public class ProposalService {
             throw new BusinessException("부적합: " + String.join(" ", q.suitabilityIssues())
                     + " 고객이 부적합 사실을 확인한 경우에만 설계서를 발행할 수 있습니다.");
         }
+        // 발행한 설계의 임시저장은 더 이상 필요 없다
+        draftRepository.findByCustomerIdAndProductId(customerId, productId).ifPresent(draftRepository::delete);
         return proposalRepository.save(new Proposal(newProposalNo(), q));
     }
 

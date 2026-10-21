@@ -141,3 +141,12 @@ dl.kv dd { margin: 0; }
 .signal-box { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 4px 0 12px; }
 .signal-box p { margin: 0; color: var(--muted); flex: 1 1 260px; }
 .signal-label.s-green { color: var(--ok); } .signal-label.s-yellow { color: var(--warn); } .signal-label.s-red { color: var(--bad); }
+
+/* 플랜 · 특약 연관 규칙 */
+.plans { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; }
+.plan-chip { display: inline-flex; align-items: center; }
+.plan.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.plan-del { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 0 4px; }
+.plan-del:hover { color: var(--bad); }
+.rules-note { margin-top: 8px; padding: 8px 10px; background: var(--soft); border-radius: 6px; color: var(--muted); }
+.rules-note b { color: var(--ink); display: block; margin-bottom: 2px; }

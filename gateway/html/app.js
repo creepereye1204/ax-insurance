@@ -32,6 +32,8 @@ async function api(path, options = {}) {
   return body;
 }
 const post = (path, body) => api(path, { method: 'POST', body: JSON.stringify(body) });
+const put = (path, body) => api(path, { method: 'PUT', body: JSON.stringify(body) });
+const del = (path) => api(path, { method: 'DELETE' });
 
 const OUTCOME = {
   STANDARD: ['표준체', 't-ok', 'g'], CONDITIONAL: ['조건부 인수', 't-warn', 'y'], REFER: ['본사 이관', 't-info', 'b'],
@@ -401,6 +403,7 @@ async function customerDetail(params, id) {
       <button class="btn ghost sm" id="consent">동의 받기 (30일 유효)</button>
       <div class="error" id="c-err" hidden></div></div>
   </div>
+  <div id="drafts"></div>
   <div class="card"><h2>가입설계서</h2>${table(['설계번호', '상품', '월보험료', '발행일', '유효기간', '상태'], d.proposals.map((p) => `
     <tr class="click" data-href="#/proposals/${p.id}"><td>${esc(p.proposalNo)}</td><td>${esc(p.productName)}</td><td class="num">${won(p.monthlyPremium)}</td>
     <td>${dt(p.issuedAt)}</td><td>${p.validUntil}</td><td>${esc(p.statusLabel)}</td></tr>`))}</div>
@@ -429,6 +432,13 @@ async function customerDetail(params, id) {
       <td>${esc(r.treatment)}</td><td>${r.cured ? '예' : '아니오'}</td></tr>`))}</div>
   </div>`;
   bindRows();
+  api(`/core/proposal-drafts?customerId=${id}`).then((drafts) => {
+    if (!drafts.length || view !== activeView) return;
+    $('drafts').innerHTML = `<div class="card"><h2>임시저장 설계 <span class="small muted">발행 전 · 이어서 작성</span></h2>
+      ${table(['상품', '플랜', '저장 시각'], drafts.map((x) => `<tr class="click" data-href="#/design?customer=${id}&product=${x.productId}">
+        <td>${esc(x.productName)}</td><td class="small">${esc(x.payload.planName || '-')}</td><td class="small">${dt(x.savedAt)}</td></tr>`))}</div>`;
+    bindRows('#drafts tr.click');
+  }).catch(() => {});
   $('consent').onclick = async () => {
     try { await post(`/core/customers/${id}/consents`, { type: 'PRE_UW_INQUIRY' }); route(); } catch (e) { showError($('c-err'), e); }
   };
@@ -497,10 +507,11 @@ function amountOptions(c) {
   return opts.map((a) => `<option value="${a}" ${a === c.defaultAmount ? 'selected' : ''}>${amountText(a)}</option>`).join('');
 }
 
-function renderDesignForm(customer, product) {
+function renderDesignForm(customer, product, restore = null) {
   const form = $('form');
   $('quote').innerHTML = '';
   if (!customer || !product) { form.innerHTML = ''; return; }
+  const hasCoverages = product.coverages.some((c) => !c.accumulation);
   const s = product.summary;
   const age = customer.insuranceAge;
   const ageOk = age >= s.minEntryAge && age <= s.maxEntryAge;
@@ -514,10 +525,16 @@ function renderDesignForm(customer, product) {
         <input id="contrib" type="number" step="10000" min="${product.minMonthlyContribution}" max="${product.maxMonthlyContribution}" value="300000"></div>` : ''}
       ${product.annuityStartAges ? `<div><label>연금개시나이</label><select id="annuity">${product.annuityStartAges.map((a) => `<option ${a === 65 ? 'selected' : ''}>${a}</option>`).join('')}</select></div>` : ''}
     </div>
-    ${product.coverages.some((c) => !c.accumulation) ? table(['가입', '담보', '분류', '가입금액'], product.coverages.filter((c) => !c.accumulation).map((c) => `
+    <div id="draft-box"></div>
+    ${hasCoverages && product.plans.length ? `<div class="plans"><span class="small muted">플랜</span>
+      ${product.plans.map((pl) => `<span class="plan-chip"><button class="btn ghost sm plan" data-id="${pl.id}" title="${esc(pl.description || '')}">${esc(pl.name)}</button>${pl.custom ? `<button class="plan-del" data-id="${pl.id}" title="저장한 플랜 삭제">×</button>` : ''}</span>`).join('')}
+      <span id="plan-applied" class="small muted"></span></div>` : ''}
+    ${hasCoverages ? table(['가입', '담보', '분류', '가입금액'], product.coverages.filter((c) => !c.accumulation).map((c) => `
       <tr><td><input type="checkbox" class="cov" value="${c.id}" ${c.required ? 'checked disabled' : 'checked'}></td>
       <td>${esc(c.name)} ${c.required ? tag('주계약', 't-info') : tag('특약', 't-muted')}</td><td class="small">${esc(c.categoryLabel)}</td>
       <td><select class="amt" data-id="${c.id}" style="max-width:160px">${amountOptions(c)}</select></td></tr>`)) : ''}
+    ${product.rules.length ? `<div class="rules-note small"><b>특약 연관 규칙</b>${product.rules.map((r) => `<div>· ${esc(r.text)}</div>`).join('')}</div>` : ''}
+    <div id="rule-msg" class="small t-info"></div>
     ${product.variable ? `<h2 style="margin-top:14px">펀드 편입비율 <span class="small muted">합계 100%, 10% 단위</span></h2>
       ${table(['펀드', '자산', '위험등급', '보수', '비율'], product.funds.map((f, i) => `
         <tr><td>${esc(f.name)}</td><td class="small">${esc(f.assetClass)}</td><td>${f.riskGrade}등급</td><td class="small">${(f.annualFeeBp / 100).toFixed(2)}%</td>
@@ -525,10 +542,113 @@ function renderDesignForm(customer, product) {
           .map((p) => `<option ${p === (f.code === 'F-BOND' ? 50 : f.code === 'F-MMF' ? 50 : 0) ? 'selected' : ''}>${p}</option>`).join('')}</select></td></tr>`))}
       <p class="small muted">고객 투자성향: ${customer.consumerType === 'PROFESSIONAL' ? '전문금융소비자 (적합성 원칙 적용 제외)'
         : esc(customer.investmentProfileLabel || '미진단 — 고객 상세에서 투자성향을 먼저 진단하세요')}</p>` : ''}
-    <div class="actions" style="margin-top:12px"><button class="btn" id="calc">보험료 계산</button></div>
+    <div class="actions" style="margin-top:12px"><button class="btn" id="calc">보험료 계산</button>
+      <button class="btn ghost" id="draft-save">임시저장</button>
+      ${hasCoverages ? `<span class="spacer"></span><input id="plan-name" placeholder="플랜 이름" style="max-width:160px"><button class="btn ghost" id="plan-save">현재 담보로 플랜 저장</button>` : ''}</div>
+    <div class="small muted" id="d-msg"></div>
     <div class="error" id="d-err" hidden></div>
   </div>`;
+  let planName = null;
   $('calc').onclick = () => calculate(customer, product, false);
+  bindRiderRules(product);
+  form.querySelectorAll('.plan').forEach((b) => (b.onclick = () => {
+    const pl = product.plans.find((x) => String(x.id) === b.dataset.id);
+    applyCoverages(pl.items);
+    planName = pl.name;
+    form.querySelectorAll('.plan').forEach((x) => x.classList.toggle('on', x === b));
+    $('plan-applied').textContent = `'${pl.name}' 적용 — 담보·가입금액은 자유롭게 바꿀 수 있습니다`;
+  }));
+  form.querySelectorAll('.plan-del').forEach((b) => (b.onclick = async () => {
+    try {
+      await del(`/core/products/${product.summary.id}/plans/${b.dataset.id}`);
+      const fresh = await api(`/core/products/${product.summary.id}`);
+      Object.assign(product, fresh);
+      renderDesignForm(customer, product, draftPayload(product, planName));
+    } catch (e) { showError($('d-err'), e); }
+  }));
+  if ($('plan-save')) $('plan-save').onclick = async () => {
+    $('d-err').hidden = true;
+    try {
+      const items = designBody(customer, product, false).coverages.map((c) => ({ coverageId: c.coverageId, amount: c.amount }));
+      await post(`/core/products/${product.summary.id}/plans`, { name: $('plan-name').value.trim(), items });
+      const fresh = await api(`/core/products/${product.summary.id}`);
+      Object.assign(product, fresh);
+      renderDesignForm(customer, product, draftPayload(product, $('plan-name').value.trim()));
+      $('d-msg').textContent = '플랜을 저장했습니다. 이 상품을 설계할 때 누구나 고를 수 있습니다.';
+    } catch (e) { showError($('d-err'), e); }
+  };
+  $('draft-save').onclick = async () => {
+    $('d-err').hidden = true;
+    try {
+      const d = await put('/core/proposal-drafts', { customerId: customer.id, productId: product.summary.id, payload: draftPayload(product, planName) });
+      $('d-msg').textContent = `임시저장했습니다 (${dt(d.savedAt)}). 고객 상세 또는 같은 고객·상품으로 가입설계를 열면 이어서 작성할 수 있습니다.`;
+    } catch (e) { showError($('d-err'), e); }
+  };
+  if (restore) {
+    applyPayload(restore);
+  } else {
+    api(`/core/proposal-drafts?customerId=${customer.id}&productId=${product.summary.id}`).then(([d]) => {
+      if (!d || !$('draft-box')) return;
+      $('draft-box').innerHTML = `<div class="notice">임시저장한 설계가 있습니다 (${dt(d.savedAt)}${d.payload.planName ? ` · ${esc(d.payload.planName)}` : ''}).
+        <button class="btn sm" id="draft-load">불러오기</button> <button class="btn ghost sm" id="draft-del">삭제</button></div>`;
+      $('draft-load').onclick = () => { applyPayload(d.payload); planName = d.payload.planName; $('draft-box').innerHTML = ''; $('d-msg').textContent = '임시저장한 설계를 불러왔습니다.'; };
+      $('draft-del').onclick = async () => { await del(`/core/proposal-drafts/${d.id}`); $('draft-box').innerHTML = ''; };
+    }).catch(() => {});
+  }
+}
+
+/** 특약 연관 규칙: 필수 동반 특약은 자동 추가, 동반 대상을 빼면 의존 특약도 함께 해제, 동시 가입 불가는 상대를 해제 */
+function bindRiderRules(product) {
+  const box = (id) => activeView.querySelector(`.cov[value="${id}"]`);
+  const nameOf = (id) => product.coverages.find((c) => c.id === id)?.name;
+  activeView.querySelectorAll('.cov').forEach((cb) => (cb.onchange = () => {
+    const id = Number(cb.value), notes = [];
+    const cascade = (cid, on) => {
+      for (const r of product.rules) {
+        if (on && r.coverageId === cid && r.type === 'REQUIRES' && box(r.targetId) && !box(r.targetId).checked) {
+          box(r.targetId).checked = true; notes.push(`'${nameOf(r.targetId)}' 자동 추가`); cascade(r.targetId, true);
+        }
+        if (on && r.type === 'EXCLUSIVE' && (r.coverageId === cid || r.targetId === cid)) {
+          const other = r.coverageId === cid ? r.targetId : r.coverageId;
+          if (box(other)?.checked && !box(other).disabled) { box(other).checked = false; notes.push(`'${nameOf(other)}' 해제 (동시 가입 불가)`); }
+        }
+        if (!on && r.targetId === cid && r.type === 'REQUIRES' && box(r.coverageId)?.checked) {
+          box(r.coverageId).checked = false; notes.push(`'${nameOf(r.coverageId)}' 함께 해제`); cascade(r.coverageId, false);
+        }
+      }
+    };
+    cascade(id, cb.checked);
+    $('rule-msg').textContent = notes.length ? `특약 연관 규칙: ${notes.join(', ')}` : '';
+  }));
+}
+
+function applyCoverages(items) {
+  const byId = Object.fromEntries(items.map((i) => [i.coverageId, i.amount]));
+  activeView.querySelectorAll('.cov').forEach((cb) => {
+    if (cb.disabled) return;
+    cb.checked = cb.value in byId;
+  });
+  activeView.querySelectorAll('.amt').forEach((sel) => {
+    const a = byId[sel.dataset.id];
+    if (a != null && [...sel.options].some((o) => Number(o.value) === a)) sel.value = String(a);
+  });
+}
+
+function draftPayload(product, planName) {
+  const b = designBody({ id: null }, product, false);
+  return { paymentTerm: b.paymentTerm, coverages: b.coverages, monthlyContribution: b.monthlyContribution,
+    annuityStartAge: b.annuityStartAge, funds: b.funds, planName: planName || null };
+}
+
+function applyPayload(p) {
+  if (p.paymentTerm && $('term')) $('term').value = String(p.paymentTerm);
+  if (p.monthlyContribution && $('contrib')) $('contrib').value = p.monthlyContribution;
+  if (p.annuityStartAge && $('annuity')) $('annuity').value = String(p.annuityStartAge);
+  if (p.coverages) applyCoverages(p.coverages.map((c) => ({ coverageId: c.coverageId, amount: c.amount })));
+  if (p.funds) {
+    const pct = Object.fromEntries(p.funds.map((f) => [f.fundCode, f.pct]));
+    activeView.querySelectorAll('.fund').forEach((f) => (f.value = String(pct[f.dataset.code] || 0)));
+  }
 }
 
 function designBody(customer, product, ack) {

@@ -405,6 +405,79 @@ def _():
     return "조회 이력 R-SMP-12 빨강, 고지 S2 빨강"
 
 
+@scenario("S19 특약 연관 규칙: 암입원일당은 암수술과 함께 / 암수술 ≤ 암진단 50% / 재해사망 ≤ 일반사망")
+def _():
+    c = customer("김정상")
+    can = product("CANCER", lambda x: not x["simplifiedUw"])
+    cov = {x["code"].rsplit("-", 1)[1]: x for x in can["coverages"]}
+    assert {r["type"] for r in can["rules"]} == {"REQUIRES", "MAX_RATIO"}, can["rules"]
+    def expect_error(amounts, text):
+        try:
+            design(c, can, 20, amounts)
+            raise AssertionError(f"규칙 위반인데 설계됨: {text}")
+        except ApiError as e:
+            assert text in str(e.detail), e.detail
+    expect_error([{"coverageId": cov["CAN"]["id"], "amount": 30_000_000}, {"coverageId": cov["CHO"]["id"], "amount": 30_000}], "함께 가입")
+    expect_error([{"coverageId": cov["CAN"]["id"], "amount": 10_000_000}, {"coverageId": cov["CSU"]["id"], "amount": 10_000_000}], "50% 이하")
+    ok = design(c, can, 20, [{"coverageId": cov["CAN"]["id"], "amount": 20_000_000}, {"coverageId": cov["CSU"]["id"], "amount": 10_000_000},
+                            {"coverageId": cov["CHO"]["id"], "amount": 30_000}])
+    wl = product("WHOLE_LIFE", lambda x: not x["simplifiedUw"])
+    w = {x["code"].rsplit("-", 1)[1]: x for x in wl["coverages"]}
+    try:
+        design(c, wl, 20, [{"coverageId": w["DTH"]["id"], "amount": 50_000_000}, {"coverageId": w["ADT"]["id"], "amount": 100_000_000}])
+        raise AssertionError("재해사망 > 일반사망인데 설계됨")
+    except ApiError as e:
+        assert "100% 이하" in str(e.detail), e.detail
+    return f"위반 3건 차단, 경계값(암수술 = 암진단 50%) 설계 {ok['monthlyPremium']:,}원"
+
+
+@scenario("S20 플랜: 기본 플랜(실속·표준·고급)으로 설계 / 설계사 플랜 저장·검증·삭제")
+def _():
+    c = customer("김정상")
+    can = product("CANCER", lambda x: not x["simplifiedUw"])
+    plans = {p["name"]: p for p in can["plans"]}
+    assert {"실속형", "표준형", "고급형"} <= set(plans), list(plans)
+    premiums = {n: design(c, can, 20, [{"coverageId": i["coverageId"], "amount": i["amount"]} for i in plans[n]["items"]])["monthlyPremium"]
+                for n in ("실속형", "표준형", "고급형")}
+    assert premiums["실속형"] < premiums["표준형"] < premiums["고급형"], premiums
+    cov = {x["code"].rsplit("-", 1)[1]: x for x in can["coverages"]}
+    try:
+        call("POST", f"/products/{can['summary']['id']}/plans", {"name": "규칙위반", "items": [
+            {"coverageId": cov["CAN"]["id"], "amount": 30_000_000}, {"coverageId": cov["CHO"]["id"], "amount": 30_000}]})
+        raise AssertionError("규칙 위반 플랜이 저장됨")
+    except ApiError as e:
+        assert "함께 가입" in str(e.detail), e.detail
+    name = "시나리오 " + time.strftime("%H%M%S")
+    saved = call("POST", f"/products/{can['summary']['id']}/plans", {"name": name, "items": [
+        {"coverageId": cov["CAN"]["id"], "amount": 50_000_000}, {"coverageId": cov["CSU"]["id"], "amount": 20_000_000}]})
+    assert saved["custom"]
+    assert any(p["id"] == saved["id"] for p in call("GET", f"/products/{can['summary']['id']}")["plans"])
+    call("DELETE", f"/products/{can['summary']['id']}/plans/{saved['id']}")
+    try:
+        call("DELETE", f"/products/{can['summary']['id']}/plans/{plans['표준형']['id']}")
+        raise AssertionError("기본 플랜이 삭제됨")
+    except ApiError as e:
+        assert "삭제할 수 없" in str(e.detail), e.detail
+    return " < ".join(f"{n} {v:,}원" for n, v in premiums.items())
+
+
+@scenario("S21 임시저장: 검증 없이 저장 → 덮어쓰기 → 설계서 발행 시 자동 삭제")
+def _():
+    c = customer("김정상")
+    hp = product("HEALTH", lambda x: not x["simplifiedUw"])
+    pid = hp["summary"]["id"]
+    for d in call("GET", f"/proposal-drafts?customerId={c['id']}&productId={pid}"):
+        call("DELETE", f"/proposal-drafts/{d['id']}")
+    half = {"paymentTerm": 20, "coverages": [{"coverageId": hp["coverages"][0]["id"], "amount": 1}], "planName": None}
+    first = call("PUT", "/proposal-drafts", {"customerId": c["id"], "productId": pid, "payload": half})
+    second = call("PUT", "/proposal-drafts", {"customerId": c["id"], "productId": pid, "payload": dict(half, planName="표준형")})
+    assert first["id"] == second["id"] and second["payload"]["planName"] == "표준형", (first["id"], second["id"])
+    assert any(d["id"] == first["id"] for d in call("GET", f"/proposal-drafts?customerId={c['id']}"))
+    design(c, hp, 20)
+    assert call("GET", f"/proposal-drafts?customerId={c['id']}&productId={pid}") == [], "발행 후에도 임시저장이 남음"
+    return "고객·상품당 1건 덮어쓰기, 발행 시 삭제"
+
+
 if __name__ == "__main__":
     width = max(len(r[1]) for r in results)
     for status, name, note, sec in results:

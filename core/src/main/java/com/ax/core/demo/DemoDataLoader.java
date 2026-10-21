@@ -34,9 +34,15 @@ import com.ax.core.external.ExternalMedicalRecordRepository;
 import com.ax.core.kcd.Kcd;
 import com.ax.core.kcd.KcdRepository;
 import com.ax.core.product.Coverage;
+import com.ax.core.product.CoverageRule;
+import com.ax.core.product.CoverageRuleRepository;
+import com.ax.core.product.PlanService;
 import com.ax.core.product.FundRepository;
 import com.ax.core.product.Product;
+import com.ax.core.product.ProductPlan;
+import com.ax.core.product.ProductPlanRepository;
 import com.ax.core.product.ProductRepository;
+import com.ax.core.product.RiderRules;
 import com.ax.core.proposal.PremiumCalculator;
 import com.ax.core.proposal.Proposal;
 import com.ax.core.proposal.ProposalService;
@@ -51,6 +57,8 @@ import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -78,6 +86,8 @@ public class DemoDataLoader implements ApplicationRunner {
     private final FundRepository fundRepository;
     private final QuestionnaireRepository questionnaireRepository;
     private final UwRuleSetRepository ruleSetRepository;
+    private final CoverageRuleRepository coverageRuleRepository;
+    private final ProductPlanRepository planRepository;
     private final CustomerRepository customerRepository;
     private final ExternalMedicalRecordRepository externalRecords;
     private final ContractRepository contractRepository;
@@ -133,6 +143,49 @@ public class DemoDataLoader implements ApplicationRunner {
             ruleSetRepository.save(ruleSetV2());
             log.info("심사 룰셋 v2 활성화 (표준/간편 적용 범위 분리)");
         }
+        if (coverageRuleRepository.count() == 0) {
+            log.info("특약 연관 규칙 {}건 등록", generateCoverageRules());
+        }
+        if (planRepository.count() == 0) {
+            Map<Long, List<RiderRules.Rule>> rules = coverageRuleRepository.findAllByOrderById().stream()
+                    .collect(Collectors.groupingBy(r -> r.getProduct().getId(), Collectors.mapping(CoverageRule::spec, Collectors.toList())));
+            List<ProductPlan> plans = new ArrayList<>();
+            for (Product p : productRepository.findAll()) {
+                plans.addAll(PlanService.defaultPlans(p, rules.getOrDefault(p.getId(), List.of())));
+            }
+            planRepository.saveAll(plans);
+            log.info("상품 기본 플랜 {}건 등록", plans.size());
+        }
+    }
+
+    /**
+     * 특약 연관 규칙 (가상). 상품 템플릿의 담보 코드 접미사로 같은 상품 안의 담보끼리 연결한다.
+     * <ul>
+     *   <li>종신: 재해사망 ≤ 일반사망 100%</li>
+     *   <li>암: 암입원일당은 암수술과 함께, 암수술 ≤ 암진단 50%</li>
+     *   <li>어린이: 질병수술비는 질병입원일당과 함께</li>
+     * </ul>
+     */
+    private int generateCoverageRules() {
+        String sql = """
+                insert into coverage_rule (product_id, type, coverage_id, target_id, ratio_pct)
+                select a.product_id, cast(? as varchar), a.id, b.id, cast(? as integer)
+                from coverage a
+                join coverage b on b.product_id = a.product_id
+                join product p on p.id = a.product_id
+                where p.type = ? and a.code like ? and b.code like ?
+                """;
+        Object[][] rules = {
+                {"MAX_RATIO", 100, "WHOLE_LIFE", "ADT", "DTH"},
+                {"REQUIRES", null, "CANCER", "CHO", "CSU"},
+                {"MAX_RATIO", 50, "CANCER", "CSU", "CAN"},
+                {"REQUIRES", null, "CHILD", "SUR", "HOS"},
+        };
+        int total = 0;
+        for (Object[] r : rules) {
+            total += jdbc.update(sql, r[0], r[1], r[2], "%-" + r[3], "%-" + r[4]);
+        }
+        return total;
     }
 
     /** 요율표 생성: 담보 기초요율 × 나이 증가율 × 성별 × 납입기간 계수 */
