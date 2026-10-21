@@ -387,7 +387,7 @@ def _():
     return "표준 노랑 → 간편 초록 → 간편심사형 계약 성립"
 
 
-@scenario("S18 한골절: 간편심사형 — 동의 조회만으로 빨강(2년 내 수술), 고지 없이도 근거 없으면 오류")
+@scenario("S18 한골절: 간편심사형 — 동의 조회만으로 빨강(2년 내 수술) / S2 수술 고지도 빨강")
 def _():
     c = customer("한골절")
     smp = product("HEALTH", lambda x: x["simplifiedUw"] and x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"]) \
