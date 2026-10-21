@@ -11,4 +11,6 @@ public interface ContractRepository extends JpaRepository<Contract, Long> {
     List<Contract> findTop100ByOrderByIdDesc();
 
     Optional<Contract> findByApplicationId(Long applicationId);
+
+    boolean existsByCustomerIdAndStatus(Long customerId, ContractStatus status);
 }

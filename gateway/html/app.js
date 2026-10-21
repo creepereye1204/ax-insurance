@@ -50,6 +50,9 @@ const tag = (label, cls) => `<span class="tag ${cls}">${esc(label)}</span>`;
 const outcomeTag = (o) => { const [l, c, light] = OUTCOME[o] || [o, 't-muted', 'b']; return `<span class="light ${light}"></span>${tag(l, c)}`; };
 const rules = (list) => (list || []).map((r) => `<span class="rule">${esc(r)}</span>`).join(' ');
 const exclusionText = (ex) => (ex || []).map((e) => `부담보: ${esc(e.label)} ${e.months ? e.months + '개월' : '~' + esc(e.until)}`).join('<br>');
+const DRIVING = { NONE: '비운전', PRIVATE: '자가용', COMMERCIAL: '영업용', MOTORCYCLE: '이륜자동차' };
+const RELATION = { SPOUSE: '배우자', PARENT: '부모', CHILD: '자녀', SIBLING: '형제자매' };
+const statusTag = (c) => (c.status === 'CONTRACTED' ? tag('계약', 't-ok') : tag('가망', 't-muted'));
 const consumerTag = (c) => (c.consumerType === 'PROFESSIONAL' ? tag('전문금융소비자', 't-info') : tag('일반금융소비자', 't-muted'));
 
 function renderMarkdown(md) {
@@ -311,10 +314,25 @@ async function customers(params) {
   const view = activeView;
   const q = params.get('q') || '';
   const page = Number(params.get('page') || 0);
-  const data = await api(`/core/customers?q=${encodeURIComponent(q)}&page=${page}`);
+  const status = params.get('status') || '';
+  const qs = (p) => `#/customers?q=${encodeURIComponent(q)}&status=${status}&page=${p}`;
+  const data = await api(`/core/customers?q=${encodeURIComponent(q)}&page=${page}${status ? '&status=' + status : ''}`);
   view.innerHTML = `
-  <div class="actions"><h1>고객관리</h1><span class="spacer"></span><button class="btn" id="new-btn">고객 등록</button></div>
-  <p class="sub">이름·연락처로 검색. 연락처는 목록에서 마스킹됩니다.</p>
+  <div class="actions"><h1>고객관리</h1><span class="spacer"></span>
+    <button class="btn ghost" id="virt-btn">가상고객 생성</button><button class="btn" id="new-btn">고객 등록</button></div>
+  <p class="sub">이름·연락처로 검색. 연락처·주민번호는 마스킹됩니다. 주민번호는 실제 번호를 받지 않고 <b>가상 번호를 자동 생성</b>해 암호화 저장합니다.</p>
+  <div class="card" id="virt-form" hidden>
+    <h2>가상고객 즉시 생성 <span class="small muted">시나리오·교육용 — 이름·생년월일·연락처·직업·가상 주민번호를 무작위로 만듭니다</span></h2>
+    <div class="row">
+      <div><label>나이(만) 최소</label><input id="v-min" type="number" min="0" max="100" value="25"></div>
+      <div><label>나이(만) 최대</label><input id="v-max" type="number" min="0" max="100" value="55"></div>
+      <div><label>성별</label><select id="v-gender"><option value="">무작위</option><option value="M">남</option><option value="F">여</option></select></div>
+      <div><label>금융소비자 구분</label><select id="v-type"><option value="GENERAL">일반</option><option value="PROFESSIONAL">전문</option></select></div>
+      <div><label>운전</label><select id="v-drive"><option value="">무작위</option>${Object.entries(DRIVING).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+    </div>
+    <div class="actions"><button class="btn" id="v-save">생성하고 열기</button><button class="btn ghost" id="v-cancel">취소</button></div>
+    <div class="error" id="v-err" hidden></div>
+  </div>
   <div class="card" id="new-form" hidden>
     <h2>고객 등록</h2>
     <div class="row">
@@ -326,6 +344,7 @@ async function customers(params) {
     <div class="row">
       <div><label>직업 (위험등급)</label><select id="n-job">${JOBS.map(([j, r]) => `<option value="${esc(j)}" data-risk="${r}">${esc(j)} (${r}등급)</option>`).join('')}</select></div>
       <div><label>금융소비자 구분</label><select id="n-type"><option value="GENERAL">일반금융소비자</option><option value="PROFESSIONAL">전문금융소비자</option></select></div>
+      <div><label>운전</label><select id="n-drive"><option value="">미확인</option>${Object.entries(DRIVING).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
     </div>
     <div class="actions"><button class="btn" id="n-save">저장</button><button class="btn ghost" id="n-cancel">취소</button></div>
     <div class="error" id="n-err" hidden></div>
@@ -333,21 +352,38 @@ async function customers(params) {
   <div class="card">
     <form class="actions" id="search" style="margin-bottom:12px">
       <input id="q" value="${esc(q)}" placeholder="이름 또는 연락처" style="max-width:280px">
+      <select id="status" style="max-width:130px"><option value="">전체 고객</option>
+        <option value="PROSPECT" ${status === 'PROSPECT' ? 'selected' : ''}>가망고객</option>
+        <option value="CONTRACTED" ${status === 'CONTRACTED' ? 'selected' : ''}>계약고객</option></select>
       <button class="btn ghost">검색</button>
       <span class="spacer"></span><span class="muted small">총 ${data.totalElements.toLocaleString()}명</span>
     </form>
-    ${table(['ID', '이름', '생년월일', '보험나이(만)', '성별', '직업', '소비자 구분', '투자성향', '연락처'], data.content.map((c) => `
-      <tr class="click" data-href="#/customers/${c.id}"><td>${c.id}</td><td><b>${esc(c.name)}</b></td><td>${c.birthDate}</td><td>${c.insuranceAge}세 (${c.age})</td>
-      <td>${c.gender === 'M' ? '남' : '여'}</td><td class="small">${esc(c.occupation)} (${c.jobRiskGrade})</td><td>${consumerTag(c)}</td>
+    ${table(['ID', '유형', '이름', '생년월일', '보험나이(만)', '성별', '직업', '운전', '소비자 구분', '투자성향', '연락처'], data.content.map((c) => `
+      <tr class="click" data-href="#/customers/${c.id}"><td>${c.id}</td><td>${statusTag(c)}</td><td><b>${esc(c.name)}</b> ${c.virtual ? tag('가상', 't-muted') : ''}</td>
+      <td>${c.birthDate}</td><td>${c.insuranceAge}세 (${c.age})</td>
+      <td>${c.gender === 'M' ? '남' : '여'}</td><td class="small">${esc(c.occupation)} (${c.jobRiskGrade})</td><td class="small">${esc(c.drivingLabel)}</td><td>${consumerTag(c)}</td>
       <td class="small">${esc(c.investmentProfileLabel || '-')}</td><td>${esc(maskPhone(c.phone))}</td></tr>`))}
     <div class="actions" style="margin-top:10px">
-      ${page > 0 ? `<a class="btn ghost sm" href="#/customers?q=${encodeURIComponent(q)}&page=${page - 1}">이전</a>` : ''}
+      ${page > 0 ? `<a class="btn ghost sm" href="${qs(page - 1)}">이전</a>` : ''}
       <span class="muted small">${data.totalPages ? page + 1 : 0} / ${data.totalPages.toLocaleString()}</span>
-      ${page + 1 < data.totalPages ? `<a class="btn ghost sm" href="#/customers?q=${encodeURIComponent(q)}&page=${page + 1}">다음</a>` : ''}
+      ${page + 1 < data.totalPages ? `<a class="btn ghost sm" href="${qs(page + 1)}">다음</a>` : ''}
     </div>
   </div>`;
-  $('search').onsubmit = (e) => { e.preventDefault(); location.hash = `#/customers?q=${encodeURIComponent($('q').value.trim())}`; };
+  $('search').onsubmit = (e) => { e.preventDefault(); location.hash = `#/customers?q=${encodeURIComponent($('q').value.trim())}&status=${$('status').value}`; };
+  $('status').onchange = () => $('search').requestSubmit();
   bindRows();
+  $('virt-btn').onclick = () => ($('virt-form').hidden = false);
+  $('v-cancel').onclick = () => ($('virt-form').hidden = true);
+  $('v-save').onclick = async () => {
+    $('v-err').hidden = true;
+    try {
+      const c = await post('/core/customers/virtual', {
+        minAge: Number($('v-min').value), maxAge: Number($('v-max').value), gender: $('v-gender').value || null,
+        consumerType: $('v-type').value, driving: $('v-drive').value || null,
+      });
+      location.hash = `#/customers/${c.id}`;
+    } catch (e) { showError($('v-err'), e); }
+  };
   $('new-btn').onclick = () => ($('new-form').hidden = false);
   $('n-cancel').onclick = () => ($('new-form').hidden = true);
   $('n-save').onclick = async () => {
@@ -357,7 +393,7 @@ async function customers(params) {
       const c = await post('/core/customers', {
         name: $('n-name').value, birthDate: $('n-birth').value || null, gender: $('n-gender').value,
         phone: $('n-phone').value.trim() || null, consumerType: $('n-type').value,
-        occupation: job.value, jobRiskGrade: Number(job.dataset.risk),
+        occupation: job.value, jobRiskGrade: Number(job.dataset.risk), driving: $('n-drive').value || null,
       });
       location.hash = `#/customers/${c.id}`;
     } catch (e) { showError($('n-err'), e); }
@@ -379,6 +415,7 @@ async function customerDetail(params, id) {
   const validConsent = d.consents.find((x) => x.valid);
   view.innerHTML = `
   <div class="actions"><h1>${esc(c.name)} <span class="muted" style="font-size:15px;font-weight:400">고객번호 ${c.id}</span></h1>
+    ${statusTag(c)} ${c.virtual ? tag('가상고객', 't-muted') : ''}
     <span class="spacer"></span>
     <a class="btn ghost" href="#/pre-uw?customer=${c.id}">선심사</a>
     <a class="btn" href="#/design?customer=${c.id}">가입설계</a></div>
@@ -386,12 +423,21 @@ async function customerDetail(params, id) {
   ${c.protectedSenior ? '<div class="notice">만 65세 이상 일반금융소비자 — 청약 시 고령자 보호 확인 절차가 필요합니다.</div>' : ''}
   <div class="grid2">
     <div class="card"><h2>기본 정보</h2><dl class="kv">
+      <dt>고객 유형</dt><dd>${esc(c.statusLabel)} <span class="small muted">· 유지 계약 유무로 자동 갱신</span></dd>
+      <dt>주민등록번호</dt><dd><span id="rrn">${esc(c.rrnMasked || '미등록')}</span>
+        ${c.rrnMasked ? `<button class="btn ghost sm" id="rrn-btn">열람</button>
+        <span id="rrn-form" hidden><input id="rrn-reason" placeholder="열람 사유 (예: 청약서 본인확인)" style="max-width:220px"> <button class="btn sm" id="rrn-go">확인</button></span>` : ''}
+        <div class="small muted">가상 번호 · AES-256-GCM 암호화 저장 · 열람 시 감사 로그</div></dd>
       <dt>생년월일</dt><dd>${c.birthDate} (만 ${c.age}세)</dd>
       <dt>보험나이</dt><dd>${c.insuranceAge}세 <span class="small muted">· 다음 상령일 ${c.nextAgeUpDate}</span></dd><dt>성별</dt><dd>${c.gender === 'M' ? '남' : '여'}</dd>
       <dt>연락처</dt><dd>${esc(maskPhone(c.phone))}</dd><dt>직업</dt><dd>${esc(c.occupation)} (위험 ${c.jobRiskGrade}등급)</dd>
+      <dt>운전</dt><dd><select id="drive" style="max-width:150px"><option value="">미확인</option>${Object.entries(DRIVING).map(([k, v]) => `<option value="${k}" ${c.driving === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+        <span class="small muted">이륜·영업용은 상해 할증, 비운전은 운전자보험 불가</span></dd>
       <dt>소비자 구분</dt><dd>${consumerTag(c)}</dd><dt>등록일</dt><dd>${dt(c.createdAt)}</dd></dl></div>
     <div class="card"><h2>투자성향 (변액보험 적합성)</h2>
-      <p>${c.investmentProfileLabel ? `${tag(c.investmentProfileLabel, 't-info')} <span class="small muted">진단 ${dt(c.profiledAt)}</span>` : tag('미진단', 't-muted')}</p>
+      <p>${c.investmentProfileLabel ? `${tag(c.investmentProfileLabel, 't-info')} <span class="small muted">진단 ${dt(c.profiledAt)}</span>
+        ${c.profiledToday ? tag('오늘 진단 — 변액 설계 가능', 't-ok') : tag('변액 설계 시 재진단 필요', 't-warn')}` : tag('미진단', 't-muted')}</p>
+      ${d.assessments.length ? `<details class="small"><summary>진단 이력 ${d.assessments.length}건</summary>${d.assessments.map((a) => `<div>${dt(a.assessedAt)} · ${esc(a.profileLabel)} (${a.totalScore}점)</div>`).join('')}</details>` : ''}
       <button class="btn ghost sm" id="profile-btn">투자성향 진단</button>
       <div id="profile-form" hidden style="margin-top:10px">
         ${PROFILE_QUESTIONS.map(([q, opts], i) => `<div style="margin-bottom:8px"><label>${i + 1}. ${q}</label>
@@ -403,6 +449,17 @@ async function customerDetail(params, id) {
       <button class="btn ghost sm" id="consent">동의 받기 (30일 유효)</button>
       <div class="error" id="c-err" hidden></div></div>
   </div>
+  <div class="card"><h2>가족관계 <span class="small muted">양방향 등록</span></h2>
+    ${table(['관계', '이름', '나이', '유형', ''], d.family.map((f) => `<tr><td>${esc(f.relationLabel)}</td>
+      <td><a href="#/customers/${f.customerId}">${esc(f.name)}</a></td><td>${f.age}세</td><td class="small">${esc(f.statusLabel)}</td>
+      <td><button class="btn ghost sm unrel" data-id="${f.customerId}">해제</button></td></tr>`), '등록된 가족이 없습니다.')}
+    <details style="margin-top:8px"><summary class="small">가족 추가</summary>
+      <div class="row" style="margin-top:8px"><div><label>관계 (이 고객 기준 상대가)</label><select id="rel">${Object.entries(RELATION).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div></div>
+      <div id="rel-picker"></div>
+      <div class="actions"><button class="btn sm" id="rel-save">가족으로 등록</button></div></details>
+    <div class="error" id="f-err" hidden></div></div>
+  ${d.rrnAccessLogs.length ? `<div class="card"><h2>주민번호 열람 기록 <span class="small muted">감사 로그</span></h2>
+    ${table(['일시', '열람자', '사유'], d.rrnAccessLogs.map((l) => `<tr><td class="small">${dt(l.accessedAt)}</td><td>${esc(l.accessor)}</td><td class="small">${esc(l.reason)}</td></tr>`))}</div>` : ''}
   <div id="drafts"></div>
   <div class="card"><h2>가입설계서</h2>${table(['설계번호', '상품', '월보험료', '발행일', '유효기간', '상태'], d.proposals.map((p) => `
     <tr class="click" data-href="#/proposals/${p.id}"><td>${esc(p.proposalNo)}</td><td>${esc(p.productName)}</td><td class="num">${won(p.monthlyPremium)}</td>
@@ -432,6 +489,36 @@ async function customerDetail(params, id) {
       <td>${esc(r.treatment)}</td><td>${r.cured ? '예' : '아니오'}</td></tr>`))}</div>
   </div>`;
   bindRows();
+  if ($('rrn-btn')) {
+    $('rrn-btn').onclick = () => { $('rrn-form').hidden = false; $('rrn-btn').hidden = true; };
+    $('rrn-go').onclick = async () => {
+      try {
+        const r = await post(`/core/customers/${id}/rrn`, { reason: $('rrn-reason').value.trim() });
+        $('rrn').textContent = r.rrn; $('rrn-form').hidden = true;
+        timers.push(setTimeout(() => { if ($('rrn')) $('rrn').textContent = c.rrnMasked; }, 15000));
+      } catch (e) { showError($('c-err'), e); }
+    };
+  }
+  $('drive').onchange = async () => {
+    try {
+      await api(`/core/customers/${id}`, { method: 'PUT', body: JSON.stringify({ name: c.name, phone: c.phone, consumerType: c.consumerType,
+        occupation: c.occupation, jobRiskGrade: c.jobRiskGrade, driving: $('drive').value || null }) });
+      route();
+    } catch (e) { showError($('c-err'), e); }
+  };
+  let relative = null;
+  await customerPicker($('rel-picker'), null, (x) => { relative = x; });
+  $('rel-save').onclick = async () => {
+    $('f-err').hidden = true;
+    try {
+      if (!relative) throw new Error('가족으로 등록할 고객을 검색해 선택하세요.');
+      await post(`/core/customers/${id}/relations`, { relativeId: relative.id, relation: $('rel').value });
+      route();
+    } catch (e) { showError($('f-err'), e); }
+  };
+  view.querySelectorAll('.unrel').forEach((b) => (b.onclick = async () => {
+    try { await del(`/core/customers/${id}/relations/${b.dataset.id}`); route(); } catch (e) { showError($('f-err'), e); }
+  }));
   api(`/core/proposal-drafts?customerId=${id}`).then((drafts) => {
     if (!drafts.length || view !== activeView) return;
     $('drafts').innerHTML = `<div class="card"><h2>임시저장 설계 <span class="small muted">발행 전 · 이어서 작성</span></h2>
@@ -540,8 +627,13 @@ function renderDesignForm(customer, product, restore = null) {
         <tr><td>${esc(f.name)}</td><td class="small">${esc(f.assetClass)}</td><td>${f.riskGrade}등급</td><td class="small">${(f.annualFeeBp / 100).toFixed(2)}%</td>
         <td><select class="fund" data-code="${f.code}" style="max-width:90px">${[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
           .map((p) => `<option ${p === (f.code === 'F-BOND' ? 50 : f.code === 'F-MMF' ? 50 : 0) ? 'selected' : ''}>${p}</option>`).join('')}</select></td></tr>`))}
-      <p class="small muted">고객 투자성향: ${customer.consumerType === 'PROFESSIONAL' ? '전문금융소비자 (적합성 원칙 적용 제외)'
-        : esc(customer.investmentProfileLabel || '미진단 — 고객 상세에서 투자성향을 먼저 진단하세요')}</p>` : ''}
+      ${customer.consumerType === 'PROFESSIONAL' ? '<p class="small muted">고객 투자성향: 전문금융소비자 (적합성 원칙 적용 제외)</p>'
+        : customer.profiledToday ? `<p class="small">고객 투자성향: ${tag(customer.investmentProfileLabel, 't-info')} <span class="muted">오늘 ${dt(customer.profiledAt).slice(11)} 진단</span></p>`
+        : `<div class="notice">변액보험은 <b>설계할 때마다 투자성향을 다시 진단</b>합니다 (금소법 적합성 원칙).
+             ${customer.investmentProfileLabel ? `최근 진단: ${esc(customer.investmentProfileLabel)} (${dt(customer.profiledAt)})` : '진단 이력 없음'}
+             <div style="margin-top:8px">${PROFILE_QUESTIONS.map(([q, opts], i) => `<div style="margin-bottom:6px"><label>${i + 1}. ${q}</label>
+               <select class="pq" style="max-width:240px">${opts.map((o, j) => `<option value="${j + 1}">${o}</option>`).join('')}</select></div>`).join('')}
+             <button class="btn sm" id="profile-now">오늘 진단 저장</button></div></div>`}` : ''}
     <div class="actions" style="margin-top:12px"><button class="btn" id="calc">보험료 계산</button>
       <button class="btn ghost" id="draft-save">임시저장</button>
       ${hasCoverages ? `<span class="spacer"></span><input id="plan-name" placeholder="플랜 이름" style="max-width:160px"><button class="btn ghost" id="plan-save">현재 담보로 플랜 저장</button>` : ''}</div>
@@ -550,6 +642,13 @@ function renderDesignForm(customer, product, restore = null) {
   </div>`;
   let planName = null;
   $('calc').onclick = () => calculate(customer, product, false);
+  if ($('profile-now')) $('profile-now').onclick = async () => {
+    try {
+      const fresh = await post(`/core/customers/${customer.id}/investment-profile`, { scores: [...form.querySelectorAll('.pq')].map((x) => Number(x.value)) });
+      Object.assign(customer, fresh);
+      renderDesignForm(customer, product, draftPayload(product, planName));
+    } catch (e) { showError($('d-err'), e); }
+  };
   bindRiderRules(product);
   form.querySelectorAll('.plan').forEach((b) => (b.onclick = () => {
     const pl = product.plans.find((x) => String(x.id) === b.dataset.id);

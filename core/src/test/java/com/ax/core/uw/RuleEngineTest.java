@@ -11,6 +11,7 @@ import static com.ax.core.product.CoverageCategory.SURGERY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ax.core.common.TreatmentType;
+import com.ax.core.customer.DrivingType;
 import com.ax.core.uw.engine.CoverageOutcome;
 import com.ax.core.uw.engine.MedicalRecord;
 import com.ax.core.uw.engine.RuleEngine;
@@ -56,7 +57,7 @@ class RuleEngineTest {
     }
 
     UwResult run(int age, Map<String, Boolean> answers, List<MedicalRecord> records, List<LocalDate> claims) {
-        return engine.evaluate(1, rules, new UwInput(TODAY, age, 1, false, answers, records, claims, List.of(MEDICAL, SURGERY, CANCER)));
+        return engine.evaluate(1, rules, new UwInput(TODAY, age, 1, null, false, answers, records, claims, List.of(MEDICAL, SURGERY, CANCER)));
     }
 
     @Test
@@ -70,14 +71,14 @@ class RuleEngineTest {
         var jobRule = new UwRule("R-JOB-01", "", 95, RuleCondition.jobRisk(3), List.of(ACCIDENT),
                 UwAction.RATING, RuleParams.rating("직업", 50));
         UwResult r = engine.evaluate(1, List.of(jobRule),
-                new UwInput(TODAY, 35, 3, false, Map.of(), List.of(), List.of(), List.of(ACCIDENT, MEDICAL)));
+                new UwInput(TODAY, 35, 3, null, false, Map.of(), List.of(), List.of(), List.of(ACCIDENT, MEDICAL)));
         assertThat(r.decisions().get(ACCIDENT).ratingPct()).isEqualTo(50);
         assertThat(r.decisions().get(MEDICAL).outcome()).isEqualTo(CoverageOutcome.STANDARD);
     }
 
     @Test
     void 적립_담보는_병력이_있어도_심사하지_않는다() {
-        UwResult r = engine.evaluate(1, rules, new UwInput(TODAY, 70, 1, false, Map.of(),
+        UwResult r = engine.evaluate(1, rules, new UwInput(TODAY, 70, 1, null, false, Map.of(),
                 List.of(record("C16.9", TODAY.minusYears(1), INPATIENT, false)), List.of(), List.of(ANNUITY)));
         assertThat(r.decisions().get(ANNUITY).outcome()).isEqualTo(CoverageOutcome.STANDARD);
         assertThat(r.decisions().get(ANNUITY).matchedRules()).isEmpty();
@@ -167,7 +168,7 @@ class RuleEngineTest {
                     UwAction.REFER, RuleParams.reason("청구"), RuleScope.ALL));
 
     UwResult runScoped(boolean simplified, Map<String, Boolean> answers, List<MedicalRecord> records, List<LocalDate> claims) {
-        return engine.evaluate(2, scoped, new UwInput(TODAY, 50, 1, simplified, answers, records, claims, List.of(MEDICAL, SURGERY)));
+        return engine.evaluate(2, scoped, new UwInput(TODAY, 50, 1, null, simplified, answers, records, claims, List.of(MEDICAL, SURGERY)));
     }
 
     @Test
@@ -212,5 +213,18 @@ class RuleEngineTest {
         // 한 담보라도 연기면 청약 전체 연기 → 빨강
         assertThat(Signal.overall(List.of(CoverageOutcome.STANDARD, CoverageOutcome.POSTPONE))).isEqualTo(Signal.RED);
         assertThat(Signal.overall(List.of(CoverageOutcome.DECLINE, CoverageOutcome.DECLINE))).isEqualTo(Signal.RED);
+    }
+
+    @Test
+    void 이륜자동차_운전은_상해만_할증_운전_미확인은_미적용() {
+        var drv = new UwRule("R-DRV-01", "", 96, RuleCondition.driving(List.of(DrivingType.MOTORCYCLE)), List.of(ACCIDENT),
+                UwAction.RATING, RuleParams.rating("이륜", 30));
+        UwResult moto = engine.evaluate(3, List.of(drv), new UwInput(TODAY, 30, 1, DrivingType.MOTORCYCLE, false, Map.of(),
+                List.of(), List.of(), List.of(ACCIDENT, MEDICAL)));
+        assertThat(moto.decisions().get(ACCIDENT).ratingPct()).isEqualTo(30);
+        assertThat(moto.decisions().get(MEDICAL).outcome()).isEqualTo(CoverageOutcome.STANDARD);
+        UwResult unknown = engine.evaluate(3, List.of(drv), new UwInput(TODAY, 30, 1, null, false, Map.of(),
+                List.of(), List.of(), List.of(ACCIDENT)));
+        assertThat(unknown.decisions().get(ACCIDENT).outcome()).isEqualTo(CoverageOutcome.STANDARD);
     }
 }

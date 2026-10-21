@@ -3,6 +3,7 @@ package com.ax.core.proposal;
 import com.ax.core.common.BaseTimeEntity;
 import com.ax.core.common.BusinessException;
 import com.ax.core.customer.Customer;
+import com.ax.core.customer.InvestmentProfile;
 import com.ax.core.product.Product;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -92,6 +93,13 @@ public class Proposal extends BaseTimeEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     private List<String> suitabilityIssues;
 
+    /** 적합성 판단에 쓴 투자성향 진단 (변액·일반금융소비자만, 진단 시각과 함께 스냅샷) */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private InvestmentProfile investmentProfile;
+
+    private LocalDateTime profiledAt;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ProposalStatus status;
@@ -127,6 +135,10 @@ public class Proposal extends BaseTimeEntity {
         this.illustration = q.illustration();
         this.suitability = q.suitability();
         this.suitabilityIssues = q.suitabilityIssues();
+        if (q.suitability() != Suitability.NOT_APPLICABLE && q.suitability() != Suitability.EXEMPT_PROFESSIONAL) {
+            this.investmentProfile = q.customer().getInvestmentProfile();
+            this.profiledAt = q.customer().getProfiledAt();
+        }
         this.status = ProposalStatus.ISSUED;
         this.issuedAt = LocalDateTime.now();
         // 상령일이 지나면 보험나이가 바뀌어 보험료가 달라지므로 유효기간은 상령일 전날까지로 제한

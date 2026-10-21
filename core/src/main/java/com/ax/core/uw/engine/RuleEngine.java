@@ -29,7 +29,8 @@ public class RuleEngine {
             ConditionSource.MEDICAL, RuleEngine::matchMedical,
             ConditionSource.CLAIM_COUNT, RuleEngine::matchClaimCount,
             ConditionSource.AGE, (c, in) -> in.age() > c.ageOver(),
-            ConditionSource.JOB_RISK, (c, in) -> in.jobRiskGrade() >= c.jobRiskAtLeast()));
+            ConditionSource.JOB_RISK, (c, in) -> in.jobRiskGrade() >= c.jobRiskAtLeast(),
+            ConditionSource.DRIVING, (c, in) -> in.driving() != null && c.driving().contains(in.driving())));
 
     public UwResult evaluate(int ruleSetVersion, List<UwRule> rules, UwInput input) {
         List<UwRule> matched = rules.stream()

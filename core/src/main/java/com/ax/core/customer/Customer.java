@@ -15,7 +15,10 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** 고객. 주민등록번호는 저장하지 않는다(생년월일·성별만). */
+/**
+ * 고객. 주민등록번호는 시스템이 만든 가상 번호만 암호화해 저장한다(원문 컬럼 없음, ResidentNumbers 참고).
+ * 기능 추가로 생긴 컬럼(유형·운전·주민번호)은 기존 3만 건이 있는 테이블이라 null 허용으로 추가했다.
+ */
 @Getter
 @Entity
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -58,6 +61,29 @@ public class Customer extends BaseTimeEntity {
 
     private LocalDateTime profiledAt;
 
+    /** 가망/계약 (null 은 기동 시 동기화 전) */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private CustomerStatus status;
+
+    /** 운전 여부 (null 은 미확인) */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private DrivingType driving;
+
+    /** 화면에서 즉시 생성한 가상고객 */
+    private Boolean virtualCustomer;
+
+    @Column(length = 120)
+    private String rrnEncrypted;
+
+    @Column(length = 14)
+    private String rrnMasked;
+
+    /** 블라인드 인덱스 (HMAC) — 중복 확인·검색용 */
+    @Column(length = 64)
+    private String rrnHash;
+
     public Customer(String name, LocalDate birthDate, Gender gender, String phone,
                     ConsumerType consumerType, String occupation, int jobRiskGrade) {
         this.name = name;
@@ -67,19 +93,53 @@ public class Customer extends BaseTimeEntity {
         this.consumerType = consumerType;
         this.occupation = occupation;
         this.jobRiskGrade = jobRiskGrade;
+        this.status = CustomerStatus.PROSPECT;
     }
 
-    public void update(String name, String phone, String occupation, int jobRiskGrade, ConsumerType consumerType) {
+    public void update(String name, String phone, String occupation, int jobRiskGrade, ConsumerType consumerType,
+                       DrivingType driving) {
         this.name = name;
         this.phone = phone;
         this.occupation = occupation;
         this.jobRiskGrade = jobRiskGrade;
         this.consumerType = consumerType;
+        this.driving = driving;
+    }
+
+    public void changeDriving(DrivingType driving) {
+        this.driving = driving;
+    }
+
+    public void markVirtual() {
+        this.virtualCustomer = true;
+    }
+
+    public boolean isVirtual() {
+        return Boolean.TRUE.equals(virtualCustomer);
+    }
+
+    public void assignRrn(ResidentNumbers.Protected rrn) {
+        this.rrnEncrypted = rrn.encrypted();
+        this.rrnMasked = rrn.masked();
+        this.rrnHash = rrn.hash();
+    }
+
+    public void changeStatus(CustomerStatus status) {
+        this.status = status;
+    }
+
+    public CustomerStatus statusOrProspect() {
+        return status == null ? CustomerStatus.PROSPECT : status;
     }
 
     public void assessInvestmentProfile(InvestmentProfile profile) {
         this.investmentProfile = profile;
         this.profiledAt = LocalDateTime.now();
+    }
+
+    /** 변액 적합성: 오늘 진단한 투자성향인가 (금소법 — 설계할 때마다 다시 진단) */
+    public boolean isProfiledOn(LocalDate date) {
+        return investmentProfile != null && profiledAt != null && profiledAt.toLocalDate().equals(date);
     }
 
     /** 만 나이 */

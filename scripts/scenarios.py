@@ -54,6 +54,11 @@ def product(type_, predicate=lambda p: True):
     return call("GET", f"/products/{next(p for p in page['content'] if predicate(p))['id']}")
 
 
+def diagnose(cust, scores):
+    """투자성향 진단 (변액은 설계할 때마다 당일 재진단)"""
+    return call("POST", f"/customers/{cust['id']}/investment-profile", {"scores": scores})
+
+
 def design(cust, prod, term, amounts=None, contribution=None, annuity_age=None, funds=None, ack=False):
     if amounts is None:
         amounts = [{"coverageId": c["id"], "amount": c["defaultAmount"]}
@@ -221,6 +226,7 @@ def _equity_funds(prod):
 @scenario("S07 오안정(안정형): 변액연금 주식형 → 부적합, 확인 없이 발행 불가 / 확인 후 발행")
 def _():
     c = customer("오안정")
+    assert diagnose(c, [1, 1, 2, 2, 2])["investmentProfile"] == "STABLE"
     prod = product("VARIABLE_ANNUITY", lambda x: x["maxEntryAge"] >= c["insuranceAge"])
     funds = _equity_funds(prod)
     try:
@@ -245,6 +251,7 @@ def _():
 @scenario("S09 강공격(공격투자형): 변액유니버설 주식형 적합 → 청약 시 원금손실 확인 필수")
 def _():
     c = customer("강공격")
+    assert diagnose(c, [5, 5, 5, 5, 5])["investmentProfile"] == "AGGRESSIVE"
     prod = product("VARIABLE_UNIVERSAL")
     p = design(c, prod, 20, contribution=300000, funds=_equity_funds(prod))
     assert p["suitabilityLabel"] == "적합", p["suitabilityLabel"]
@@ -476,6 +483,93 @@ def _():
     design(c, hp, 20)
     assert call("GET", f"/proposal-drafts?customerId={c['id']}&productId={pid}") == [], "발행 후에도 임시저장이 남음"
     return "고객·상품당 1건 덮어쓰기, 발행 시 삭제"
+
+
+@scenario("S22 가상고객 즉시 생성: 가상 주민번호(마스킹·암호화) → 열람 시 사유·감사 로그 / 가망 → 계약 → 철회 시 가망")
+def _():
+    c = call("POST", "/customers/virtual", {"minAge": 30, "maxAge": 40, "gender": "F", "driving": "PRIVATE"})
+    assert c["virtual"] and c["gender"] == "F" and 30 <= c["age"] <= 40 and c["driving"] == "PRIVATE", c
+    assert c["status"] == "PROSPECT", c["status"]
+    masked = c["rrnMasked"]
+    assert masked.endswith("******") and masked[:6] == c["birthDate"][2:].replace("-", "") and masked[7] in "24", masked
+    try:
+        call("POST", f"/customers/{c['id']}/rrn", {"reason": ""})
+        raise AssertionError("사유 없이 열람됨")
+    except ApiError as e:
+        assert e.status in (400, 422), e
+    rrn = call("POST", f"/customers/{c['id']}/rrn", {"reason": "시나리오 본인확인"})["rrn"]
+    assert rrn.startswith(masked[:8]) and rrn[8:10] == "99", rrn
+    detail = call("GET", f"/customers/{c['id']}")
+    assert detail["rrnAccessLogs"][0]["reason"] == "시나리오 본인확인"
+    p = design(c, product("HEALTH", lambda x: not x["simplifiedUw"] and x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"]), 20)
+    _, d = apply(p, c)
+    d = issued(d)
+    assert call("GET", f"/customers/{c['id']}")["customer"]["status"] == "CONTRACTED"
+    call("POST", f"/contracts/{d['contractId']}/withdraw")
+    assert call("GET", f"/customers/{c['id']}")["customer"]["status"] == "PROSPECT"
+    return f"{c['name']} {masked} → 계약고객 → 철회 후 가망고객"
+
+
+@scenario("S23 운전: 이륜자동차 운전자 운전자보험 상해 할증(R-DRV-01) / 비운전자는 운전자보험 불가")
+def _():
+    moto = call("POST", "/customers/virtual", {"minAge": 30, "maxAge": 45, "driving": "MOTORCYCLE"})
+    drv = product("DRIVER", lambda x: not x["simplifiedUw"] and x["minEntryAge"] <= moto["insuranceAge"] <= x["maxEntryAge"])
+    p = design(moto, drv, 20)
+    _, d = apply(p, moto)
+    d = issued(d)
+    rules = {r for x in d["uwCase"]["results"] for r in x["matchedRules"]}
+    assert "R-DRV-01" in rules and all(x["ratingPct"] >= 30 for x in d["uwCase"]["results"]), d["uwCase"]["results"]
+    none = call("POST", "/customers/virtual", {"minAge": 30, "maxAge": 45, "driving": "NONE"})
+    try:
+        design(none, drv, 20)
+        raise AssertionError("비운전자가 운전자보험에 설계됨")
+    except ApiError as e:
+        assert "비운전자" in str(e.detail), e.detail
+    return f"이륜 할증 {d['uwCase']['results'][0]['ratingPct']}%, 비운전 차단"
+
+
+@scenario("S24 가족관계: 양방향 등록 / 배우자 1명 / 부모는 나이가 많아야 함 / 해제")
+def _():
+    me = call("POST", "/customers/virtual", {"minAge": 35, "maxAge": 40})
+    spouse = call("POST", "/customers/virtual", {"minAge": 35, "maxAge": 40})
+    other = call("POST", "/customers/virtual", {"minAge": 35, "maxAge": 40})
+    kid = call("POST", "/customers/virtual", {"minAge": 5, "maxAge": 10})
+    call("POST", f"/customers/{me['id']}/relations", {"relativeId": spouse["id"], "relation": "SPOUSE"})
+    call("POST", f"/customers/{me['id']}/relations", {"relativeId": kid["id"], "relation": "CHILD"})
+    fam = {f["name"]: f["relation"] for f in call("GET", f"/customers/{kid['id']}")["family"]}
+    assert fam == {me["name"]: "PARENT"} or fam.get(me["name"]) == "PARENT", fam
+    for body, text in (({"relativeId": other["id"], "relation": "SPOUSE"}, "배우자는 1명"),
+                       ({"relativeId": kid["id"], "relation": "PARENT"}, "이미 등록")):
+        try:
+            call("POST", f"/customers/{me['id']}/relations", body)
+            raise AssertionError(f"허용되면 안 됨: {text}")
+        except ApiError as e:
+            assert text in str(e.detail), e.detail
+    try:
+        call("POST", f"/customers/{other['id']}/relations", {"relativeId": kid["id"], "relation": "PARENT"})
+        raise AssertionError("어린 고객이 부모로 등록됨")
+    except ApiError as e:
+        assert "나이" in str(e.detail), e.detail
+    call("DELETE", f"/customers/{me['id']}/relations/{spouse['id']}")
+    assert call("GET", f"/customers/{spouse['id']}")["family"] == []
+    return "양방향·제약 3건·해제 확인"
+
+
+@scenario("S25 변액 적합성: 미진단이면 설계 불가 → 당일 진단 후 설계, 설계서에 진단 결과·시각 스냅샷")
+def _():
+    c = call("POST", "/customers/virtual", {"minAge": 30, "maxAge": 45})
+    prod = product("VARIABLE_UNIVERSAL", lambda x: x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"])
+    try:
+        design(c, prod, 20, contribution=300000, funds=_equity_funds(prod))
+        raise AssertionError("미진단인데 변액 설계됨")
+    except ApiError as e:
+        assert "투자성향" in str(e.detail), e.detail
+    c = diagnose(c, [4, 4, 4, 4, 4])
+    assert c["profiledToday"], c
+    p = design(c, prod, 20, contribution=300000, funds=_equity_funds(prod), ack=True)
+    assert p["investmentProfileLabel"] == c["investmentProfileLabel"] and p["profiledAt"], (p["investmentProfileLabel"], p["profiledAt"])
+    assert len(call("GET", f"/customers/{c['id']}")["assessments"]) == 1
+    return f"{p['investmentProfileLabel']} 진단 → {p['suitabilityLabel']}"
 
 
 if __name__ == "__main__":

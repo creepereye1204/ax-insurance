@@ -3,6 +3,7 @@ package com.ax.core.proposal;
 import com.ax.core.common.BusinessException;
 import com.ax.core.customer.ConsumerType;
 import com.ax.core.customer.Customer;
+import com.ax.core.customer.DrivingType;
 import com.ax.core.customer.InvestmentProfile;
 import com.ax.core.product.Coverage;
 import com.ax.core.product.CoverageRuleRepository;
@@ -11,6 +12,7 @@ import com.ax.core.product.FundRepository;
 import com.ax.core.product.PremiumConversion;
 import com.ax.core.product.PremiumRateRepository;
 import com.ax.core.product.Product;
+import com.ax.core.product.ProductType;
 import com.ax.core.product.RiderRules;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -77,6 +79,9 @@ public class PremiumCalculator {
             throw new BusinessException("가입 가능 나이(보험나이 %d~%d세)가 아닙니다. 고객 보험나이: %d세 (만 %d세)"
                     .formatted(product.getMinEntryAge(), product.getMaxEntryAge(), age, customer.ageAt(today)));
         }
+        if (product.getType() == ProductType.DRIVER && customer.getDriving() == DrivingType.NONE) {
+            throw new BusinessException("비운전자는 운전자보험에 가입할 수 없습니다. 고객의 운전 여부를 확인하세요.");
+        }
         if (!product.getPaymentTerms().contains(in.paymentTerm())) {
             throw new BusinessException("선택할 수 없는 납입기간입니다: " + in.paymentTerm() + "년");
         }
@@ -102,7 +107,7 @@ public class PremiumCalculator {
                 double feePct = funds.stream()
                         .mapToDouble(f -> fundMap.get(f.fundCode()).getAnnualFeeBp() / 100.0 * f.pct() / 100).sum();
                 illustration = Illustration.variable(age, contribution, in.paymentTerm(), annuityAge, feePct);
-                issues = suitabilityIssues(customer, funds, fundMap);
+                issues = suitabilityIssues(customer, funds, fundMap, today);
                 suitability = decideSuitability(customer, issues, in.unsuitableAcknowledged());
             } else {
                 illustration = Illustration.fixed(age, contribution, in.paymentTerm(), annuityAge);
@@ -224,13 +229,19 @@ public class PremiumCalculator {
     }
 
     /** 적합성 원칙: 일반금융소비자의 투자성향보다 위험한 펀드가 있는지 */
-    private static List<String> suitabilityIssues(Customer customer, List<FundAllocation> funds, Map<String, Fund> fundMap) {
+    private static List<String> suitabilityIssues(Customer customer, List<FundAllocation> funds, Map<String, Fund> fundMap,
+                                                  LocalDate today) {
         if (customer.getConsumerType() == ConsumerType.PROFESSIONAL) {
             return List.of();
         }
         InvestmentProfile profile = customer.getInvestmentProfile();
         if (profile == null) {
-            throw new BusinessException("변액보험은 투자성향 진단이 필요합니다. 고객 상세에서 투자성향을 진단하세요.");
+            throw new BusinessException("변액보험은 투자성향 진단이 필요합니다. 투자성향을 진단하세요.");
+        }
+        // 금소법 적합성 원칙: 지난 진단을 재사용하지 않고 설계할 때마다(당일) 다시 진단한다
+        if (!customer.isProfiledOn(today)) {
+            throw new BusinessException("변액보험은 설계할 때마다 투자성향을 다시 진단해야 합니다 (최근 진단 %s, %s)."
+                    .formatted(customer.getProfiledAt().toLocalDate(), profile.getLabel()));
         }
         return funds.stream()
                 .map(f -> fundMap.get(f.fundCode()))

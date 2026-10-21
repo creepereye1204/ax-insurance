@@ -42,7 +42,8 @@ public class UwInputFactory {
                 .map(d -> new MedicalRecord(SOURCE_DISCLOSURE, d.getKcdCode(), d.getDiagnosedOn(), d.getTreatment(), d.isCured()))
                 .toList();
         Customer c = app.getCustomer();
-        return new UwInput(asOf, c.ageAt(asOf), c.getJobRiskGrade(), app.getProduct().isSimplifiedUw(), answers, records,
+        return new UwInput(asOf, c.ageAt(asOf), c.getJobRiskGrade(), c.getDriving(), app.getProduct().isSimplifiedUw(),
+                answers, records,
                 claimDates(c.getId()), categories);
     }
 
@@ -56,7 +57,8 @@ public class UwInputFactory {
         Map<String, Boolean> answers = new LinkedHashMap<>();
         disclosure.forEach(a -> answers.put(a.getQuestion().getCode(), a.isAnswer()));
         List<MedicalRecord> records = Stream.concat(history.stream(), disclosedRecords(disclosure).stream()).toList();
-        return new UwInput(asOf, customer.ageAt(asOf), customer.getJobRiskGrade(), product.isSimplifiedUw(), answers, records,
+        return new UwInput(asOf, customer.ageAt(asOf), customer.getJobRiskGrade(), customer.getDriving(),
+                product.isSimplifiedUw(), answers, records,
                 claimDates(customer.getId()), categories);
     }
 

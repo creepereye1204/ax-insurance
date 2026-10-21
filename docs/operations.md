@@ -82,6 +82,19 @@ Resilience4j, `application.yml` 의 `resilience4j.circuitbreaker.instances.ai`
 | AI 재기동 + 30초 | **HALF_OPEN** |
 | 청구 2건 | AI 검토 성공 → **CLOSED** |
 
+## 비밀값: 주민번호 암호화 키
+
+| 항목 | 위치 | 주입 대상 |
+|---|---|---|
+| `AX_RRN_KEY` (AES-256, base64 32바이트) | `secrets/ax.rrn.key` (git 제외, 600) | **core-a, core-b 만** — compose `secrets` → `/run/secrets/ax.rrn.key` |
+| LLM API 키 등 | `.env` (git 제외) | api 등 `env_file` |
+
+- 기간계는 `spring.config.import: optional:configtree:/run/secrets/` 로 파일명을 프로퍼티(`ax.rrn.key`)로 읽는다
+- `.env` 에 두지 않는 이유: `.env` 는 AI 서비스도 `env_file` 로 통째로 읽는다 → 주민번호 키가 필요 없는 컨테이너에 노출 (문제 해결 기록 14)
+- 최초 설정: `mkdir -p secrets && head -c 32 /dev/urandom | base64 > secrets/ax.rrn.key && chmod 600 secrets/ax.rrn.key`
+- **키를 잃으면 저장된 주민번호를 복호화할 수 없다** → 서버 밖에 별도 백업. 교체 시에는 새 키로 재암호화 배치가 필요(암호문 앞 `v1:` 은 키 버전 표시용)
+- 키가 없으면 개발용 고정 키로 동작하고 경고 로그를 남긴다 (CI 는 실행마다 임시 키 생성)
+
 ## CI (GitHub Actions)
 
 `.github/workflows/ci.yml` — main 푸시와 PR 마다

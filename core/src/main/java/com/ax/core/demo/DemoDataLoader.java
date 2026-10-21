@@ -25,6 +25,7 @@ import com.ax.core.contract.ContractRepository;
 import com.ax.core.customer.ConsumerType;
 import com.ax.core.customer.Customer;
 import com.ax.core.customer.CustomerRepository;
+import com.ax.core.customer.DrivingType;
 import com.ax.core.customer.Gender;
 import com.ax.core.customer.InvestmentProfile;
 import com.ax.core.disclosure.Questionnaire;
@@ -137,12 +138,8 @@ public class DemoDataLoader implements ApplicationRunner {
             questionnaireRepository.save(simplifiedQuestionnaire());
             log.info("간편고지(3-2-5) 질문지 v1 등록");
         }
-        if (!ruleSetRepository.existsByVersion(2)) {
-            ruleSetRepository.findByActiveTrue().forEach(UwRuleSet::deactivate);
-            em.flush();
-            ruleSetRepository.save(ruleSetV2());
-            log.info("심사 룰셋 v2 활성화 (표준/간편 적용 범위 분리)");
-        }
+        activateRuleSet(ruleSetV2());
+        activateRuleSet(ruleSetV3());
         if (coverageRuleRepository.count() == 0) {
             log.info("특약 연관 규칙 {}건 등록", generateCoverageRules());
         }
@@ -156,6 +153,17 @@ public class DemoDataLoader implements ApplicationRunner {
             planRepository.saveAll(plans);
             log.info("상품 기본 플랜 {}건 등록", plans.size());
         }
+    }
+
+    /** 새 버전 룰셋이 없으면 저장하고 활성 버전을 교체한다 */
+    private void activateRuleSet(UwRuleSet next) {
+        if (ruleSetRepository.existsByVersion(next.getVersion())) {
+            return;
+        }
+        ruleSetRepository.findByActiveTrue().forEach(UwRuleSet::deactivate);
+        em.flush();
+        ruleSetRepository.save(next);
+        log.info("심사 룰셋 v{} 활성화 — {}", next.getVersion(), next.getDescription());
     }
 
     /**
@@ -256,23 +264,39 @@ public class DemoDataLoader implements ApplicationRunner {
      * 선심사 때 조회 이력만으로 "간편고지 해당 가능성"을 미리 알려 주기 위해서다.
      */
     private UwRuleSet ruleSetV2() {
-        List<String> major = List.of("C*", "I21*", "I22*", "I60*", "I61*", "I62*", "I63*", "I64*");
-        List<TreatmentType> admitted = List.of(INPATIENT, TreatmentType.SURGERY);
         UwRuleSet set = new UwRuleSet(2, "데모 심사 기준 (가상) — 간편심사형 3-2-5 분리");
-        set.add(new UwRule("R-SMP-01", "간편고지 1 해당", 10, RuleCondition.answer("S1"), List.of(), UwAction.DECLINE,
-                        RuleParams.reason("간편고지 1(3개월 내 입원·수술·추가검사 소견) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED))
-                .add(new UwRule("R-SMP-02", "간편고지 2 해당", 11, RuleCondition.answer("S2"), List.of(), UwAction.DECLINE,
-                        RuleParams.reason("간편고지 2(2년 내 입원·수술) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED))
-                .add(new UwRule("R-SMP-03", "간편고지 3 해당", 12, RuleCondition.answer("S3"), List.of(), UwAction.DECLINE,
-                        RuleParams.reason("간편고지 3(5년 내 암·뇌졸중·심근경색) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED))
-                .add(new UwRule("R-SMP-11", "3개월 내 입원·수술 이력", 13, RuleCondition.medical(List.of("*"), 3, admitted, null),
-                        List.of(), UwAction.DECLINE, RuleParams.reason("3개월 내 입원·수술 이력 — 간편고지 1 해당"), RuleScope.SIMPLIFIED))
-                .add(new UwRule("R-SMP-12", "2년 내 입원·수술 이력", 14, RuleCondition.medical(List.of("*"), 24, admitted, null),
-                        List.of(), UwAction.DECLINE, RuleParams.reason("2년 내 입원·수술 이력 — 간편고지 2 해당"), RuleScope.SIMPLIFIED))
-                .add(new UwRule("R-SMP-13", "5년 내 3대 질병 이력", 15, RuleCondition.medical(major, 60, null, null),
-                        List.of(), UwAction.DECLINE, RuleParams.reason("5년 내 암·뇌졸중·심근경색 이력 — 간편고지 3 해당"), RuleScope.SIMPLIFIED));
+        simplifiedRules().forEach(set::add);
         standardRules(RuleScope.STANDARD).forEach(set::add);
         return set;
+    }
+
+    /** v3: v2 + 운전 위험 (이륜자동차·영업용 운전은 상해 담보 할증, 심사 유형 무관) */
+    private UwRuleSet ruleSetV3() {
+        UwRuleSet set = new UwRuleSet(3, "데모 심사 기준 (가상) — 운전 위험 추가");
+        simplifiedRules().forEach(set::add);
+        standardRules(RuleScope.STANDARD).forEach(set::add);
+        set.add(new UwRule("R-DRV-01", "이륜자동차 운전", 96, RuleCondition.driving(List.of(DrivingType.MOTORCYCLE)),
+                        List.of(ACCIDENT), UwAction.RATING, RuleParams.rating("이륜자동차 운전 — 상해 담보 할증", 30), RuleScope.ALL))
+                .add(new UwRule("R-DRV-02", "영업용 운전", 97, RuleCondition.driving(List.of(DrivingType.COMMERCIAL)),
+                        List.of(ACCIDENT), UwAction.RATING, RuleParams.rating("영업용 차량 운전 — 상해 담보 할증", 10), RuleScope.ALL));
+        return set;
+    }
+
+    private List<UwRule> simplifiedRules() {
+        List<String> major = List.of("C*", "I21*", "I22*", "I60*", "I61*", "I62*", "I63*", "I64*");
+        List<TreatmentType> admitted = List.of(INPATIENT, TreatmentType.SURGERY);
+        return List.of(new UwRule("R-SMP-01", "간편고지 1 해당", 10, RuleCondition.answer("S1"), List.of(), UwAction.DECLINE,
+                        RuleParams.reason("간편고지 1(3개월 내 입원·수술·추가검사 소견) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED),
+                new UwRule("R-SMP-02", "간편고지 2 해당", 11, RuleCondition.answer("S2"), List.of(), UwAction.DECLINE,
+                        RuleParams.reason("간편고지 2(2년 내 입원·수술) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED),
+                new UwRule("R-SMP-03", "간편고지 3 해당", 12, RuleCondition.answer("S3"), List.of(), UwAction.DECLINE,
+                        RuleParams.reason("간편고지 3(5년 내 암·뇌졸중·심근경색) 해당 — 간편심사형 인수 불가"), RuleScope.SIMPLIFIED),
+                new UwRule("R-SMP-11", "3개월 내 입원·수술 이력", 13, RuleCondition.medical(List.of("*"), 3, admitted, null),
+                        List.of(), UwAction.DECLINE, RuleParams.reason("3개월 내 입원·수술 이력 — 간편고지 1 해당"), RuleScope.SIMPLIFIED),
+                new UwRule("R-SMP-12", "2년 내 입원·수술 이력", 14, RuleCondition.medical(List.of("*"), 24, admitted, null),
+                        List.of(), UwAction.DECLINE, RuleParams.reason("2년 내 입원·수술 이력 — 간편고지 2 해당"), RuleScope.SIMPLIFIED),
+                new UwRule("R-SMP-13", "5년 내 3대 질병 이력", 15, RuleCondition.medical(major, 60, null, null),
+                        List.of(), UwAction.DECLINE, RuleParams.reason("5년 내 암·뇌졸중·심근경색 이력 — 간편고지 3 해당"), RuleScope.SIMPLIFIED));
     }
 
     /** 표준 심사 룰. 잦은 청구·고위험 직업은 심사 유형과 무관하므로 항상 전체 적용 */

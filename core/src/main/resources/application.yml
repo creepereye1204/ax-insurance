@@ -1,6 +1,9 @@
 spring:
   application:
     name: ax-core
+  config:
+    # compose secret 파일(/run/secrets/<프로퍼티명>)을 프로퍼티로 읽는다 — 주민번호 키 등
+    import: optional:configtree:/run/secrets/
   datasource:
     # 같은 Postgres 인스턴스, core 스키마로 분리
     url: ${DB_URL:jdbc:postgresql://localhost:55440/ax?currentSchema=core}
@@ -49,6 +52,10 @@ ax:
     connect-timeout: 3s
     # 로컬 LLM 은 콜드 스타트 시 1분 이상 걸릴 수 있음
     read-timeout: 180s
+  rrn:
+    # 주민번호 암호화 키 (base64 32바이트). 운영은 compose secret → /run/secrets/ax.rrn.key (configtree 로 이 값을 덮어씀).
+    # 비어 있으면 개발용 고정 키 + 경고 로그
+    key: ${AX_RRN_KEY:}
   demo:
     # 여러 인스턴스가 동시에 뜰 때 데모 데이터는 한 인스턴스만 적재
     enabled: ${AX_DEMO_ENABLED:true}

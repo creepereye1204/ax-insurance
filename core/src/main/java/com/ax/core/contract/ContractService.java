@@ -2,6 +2,7 @@ package com.ax.core.contract;
 
 import com.ax.core.application.Application;
 import com.ax.core.common.NotFoundException;
+import com.ax.core.customer.CustomerStatus;
 import com.ax.core.uw.UwCoverageResult;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -32,6 +33,7 @@ public class ContractService {
             contract.addCoverage(new ContractCoverage(r.getCoverage(), r.getInsuredAmount(), r.getBasePremium(),
                     r.getRatingPct(), exclusions));
         }
+        application.getCustomer().changeStatus(CustomerStatus.CONTRACTED);
         return contractRepository.save(contract);
     }
 
@@ -44,6 +46,7 @@ public class ContractService {
     public Contract withdraw(Long id) {
         Contract contract = get(id);
         contract.withdraw(LocalDate.now());
+        syncCustomerStatus(contract);
         return contract;
     }
 
@@ -51,7 +54,15 @@ public class ContractService {
     public Contract terminate(Long id) {
         Contract contract = get(id);
         contract.terminate();
+        syncCustomerStatus(contract);
         return contract;
+    }
+
+    /** 유지 중인 계약이 하나도 남지 않으면 가망고객으로 되돌린다 */
+    private void syncCustomerStatus(Contract changed) {
+        contractRepository.flush();
+        boolean active = contractRepository.existsByCustomerIdAndStatus(changed.getCustomer().getId(), ContractStatus.ACTIVE);
+        changed.getCustomer().changeStatus(active ? CustomerStatus.CONTRACTED : CustomerStatus.PROSPECT);
     }
 
     public static String newContractNo() {

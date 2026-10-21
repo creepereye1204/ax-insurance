@@ -59,7 +59,8 @@ public class ProposalController {
                            Long monthlyContribution, Integer annuityStartAge, List<FundAllocation> funds,
                            long monthlyPremium, LocalDate nextAgeUpDate, Long premiumAfterAgeUp, Long firstPremium,
                            Integer conversionRatePct, Long convertedPremium, Illustration illustration,
-                           String suitabilityLabel, List<String> suitabilityIssues, LocalDateTime issuedAt,
+                           String suitabilityLabel, List<String> suitabilityIssues, String investmentProfileLabel,
+                           LocalDateTime profiledAt, LocalDateTime issuedAt,
                            LocalDate validUntil, String validUntilReason, boolean expired, List<CoverageLine> coverages) {
         public static Response from(Proposal p) {
             return new Response(p.getId(), p.getProposalNo(), p.getStatus().name(), p.getStatus().getLabel(),
@@ -69,6 +70,7 @@ public class ProposalController {
                     p.getMonthlyContribution(), p.getAnnuityStartAge(), p.getFunds(), p.getMonthlyPremium(),
                     p.getNextAgeUpDate(), p.getPremiumAfterAgeUp(), p.getFirstPremium(), p.getConversionRatePct(),
                     p.getConvertedPremium(), p.getIllustration(), p.getSuitability().getLabel(), p.getSuitabilityIssues(),
+                    p.getInvestmentProfile() == null ? null : p.getInvestmentProfile().getLabel(), p.getProfiledAt(),
                     p.getIssuedAt(), p.getValidUntil(), p.getValidUntilReason(), p.isExpired(LocalDate.now()),
                     p.getCoverages().stream().map(c -> new CoverageLine(c.getCoverage().getId(), c.getCoverage().getName(),
                             c.getCoverage().getCategory().getLabel(), c.getCoverage().isRequired(), c.getInsuredAmount(),

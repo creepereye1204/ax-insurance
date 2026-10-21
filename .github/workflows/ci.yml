@@ -51,6 +51,7 @@ jobs:
         run: |
           docker network create llm_default
           cp .env.example .env
+          mkdir -p secrets && head -c 32 /dev/urandom | base64 > secrets/ax.rrn.key   # 주민번호 암호화 키 (CI 용 임시)
           docker compose config -q
 
   scenario-test:
@@ -69,6 +70,7 @@ jobs:
         run: |
           docker network create llm_default   # 운영 서버의 Ollama 네트워크 대체 (AI 서비스는 CI 에서 띄우지 않음)
           cp .env.example .env
+          mkdir -p secrets && head -c 32 /dev/urandom | base64 > secrets/ax.rrn.key   # 주민번호 암호화 키 (CI 용 임시)
       - name: DB + 기간계 기동
         run: docker compose up -d --build db core-a
       - name: readiness 대기 (데이터 적재 포함)
@@ -79,7 +81,7 @@ jobs:
           done
           docker compose logs core-a | tail -100
           exit 1
-      - name: 시나리오 14개 실행
+      - name: 업무 시나리오 실행
         run: python3 scripts/scenarios.py http://localhost:8031
       - name: 실패 시 로그
         if: failure()

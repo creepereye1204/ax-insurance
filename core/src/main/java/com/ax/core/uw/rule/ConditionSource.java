@@ -11,5 +11,7 @@ public enum ConditionSource {
     /** 피보험자 나이 */
     AGE,
     /** 직업 위험등급 */
-    JOB_RISK
+    JOB_RISK,
+    /** 운전 여부·차종 */
+    DRIVING
 }
