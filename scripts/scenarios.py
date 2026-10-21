@@ -449,7 +449,7 @@ def _():
         assert "함께 가입" in str(e.detail), e.detail
     name = "시나리오 " + time.strftime("%H%M%S")
     saved = call("POST", f"/products/{can['summary']['id']}/plans", {"name": name, "items": [
-        {"coverageId": cov["CAN"]["id"], "amount": 50_000_000}, {"coverageId": cov["CSU"]["id"], "amount": 20_000_000}]})
+        {"coverageId": cov["CAN"]["id"], "amount": 50_000_000}, {"coverageId": cov["CSU"]["id"], "amount": 10_000_000}]})
     assert saved["custom"]
     assert any(p["id"] == saved["id"] for p in call("GET", f"/products/{can['summary']['id']}")["plans"])
     call("DELETE", f"/products/{can['summary']['id']}/plans/{saved['id']}")
