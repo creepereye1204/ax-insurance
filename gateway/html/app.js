@@ -220,6 +220,9 @@ const routes = [
   [/^\/$/, home],
   [/^\/customers$/, customers],
   [/^\/customers\/(\d+)$/, customerDetail],
+  [/^\/corporates$/, corporates],
+  [/^\/corporates\/(\d+)$/, corporateDetail],
+  [/^\/group-proposals\/(\d+)$/, groupProposalDetail],
   [/^\/products$/, products],
   [/^\/design$/, design],
   [/^\/proposals\/(\d+)$/, proposalDetail],
@@ -920,6 +923,143 @@ async function preUw(params) {
           <td>${TREATMENT[m.treatment] || esc(m.treatment)}</td><td>${m.cured ? '예' : '아니오'}</td></tr>`), '조회하지 않았거나 조회된 이력이 없습니다.')}</div>`;
     } catch (e) { showError($('err'), e); }
   };
+}
+
+// ============================================================ 법인고객 · 단체 가입설계
+async function corporates(params) {
+  const view = activeView;
+  const q = params.get('q') || '';
+  const [data, industries] = await Promise.all([api(`/core/corporates?q=${encodeURIComponent(q)}`), cached('industries', '/core/corporates/industries')]);
+  view.innerHTML = `
+  <div class="actions"><h1>법인고객</h1><span class="spacer"></span><button class="btn" id="virt-btn">가상 법인 생성</button></div>
+  <p class="sub">단체보험의 계약자(보험료 납부)는 법인, 피보험자는 소속 종업원(개인고객)입니다. 사업자번호는 가상 번호(999-)입니다.</p>
+  <div class="card" id="virt-form" hidden><h2>가상 법인 즉시 생성 <span class="small muted">종업원(가상 개인고객)까지 함께 만듭니다</span></h2>
+    <div class="row">
+      <div><label>법인명 (비우면 자동)</label><input id="v-name" maxlength="100"></div>
+      <div><label>업종</label><select id="v-ind">${industries.map((i) => `<option>${esc(i.name)}</option>`).join('')}</select></div>
+      <div><label>종업원 수 (1~300)</label><input id="v-emp" type="number" min="1" max="300" value="20"></div>
+    </div>
+    <div class="actions"><button class="btn" id="v-save">생성하고 열기</button><button class="btn ghost" id="v-cancel">취소</button></div>
+    <div class="error" id="v-err" hidden></div></div>
+  <div class="card">
+    <form class="actions" id="search" style="margin-bottom:12px"><input id="q" value="${esc(q)}" placeholder="법인명 또는 사업자번호" style="max-width:280px">
+      <button class="btn ghost">검색</button><span class="spacer"></span><span class="muted small">총 ${data.totalElements.toLocaleString()}곳</span></form>
+    ${table(['ID', '법인명', '사업자번호', '업종 (위험)', '대표', '종업원'], data.content.map((c) => `
+      <tr class="click" data-href="#/corporates/${c.id}"><td>${c.id}</td><td><b>${esc(c.name)}</b> ${c.virtual ? tag('가상', 't-muted') : ''}</td>
+      <td>${esc(c.bizRegNo)}</td><td>${esc(c.industry)} (${c.industryRiskGrade})</td><td>${esc(c.representative)}</td><td class="num">${c.employees}명</td></tr>`),
+      '등록된 법인이 없습니다. 가상 법인을 생성해 보세요.')}</div>`;
+  bindRows();
+  $('search').onsubmit = (e) => { e.preventDefault(); location.hash = `#/corporates?q=${encodeURIComponent($('q').value.trim())}`; };
+  $('virt-btn').onclick = () => ($('virt-form').hidden = false);
+  $('v-cancel').onclick = () => ($('virt-form').hidden = true);
+  $('v-save').onclick = async () => {
+    $('v-err').hidden = true;
+    $('v-save').disabled = true;
+    try {
+      const c = await post('/core/corporates/virtual', { name: $('v-name').value.trim() || null, industry: $('v-ind').value, employees: Number($('v-emp').value) });
+      location.hash = `#/corporates/${c.id}`;
+    } catch (e) { showError($('v-err'), e); } finally { $('v-save').disabled = false; }
+  };
+}
+
+async function corporateDetail(params, id) {
+  const view = activeView;
+  const d = await api(`/core/corporates/${id}`);
+  const c = d.corporate;
+  view.innerHTML = `
+  <div class="actions"><h1>${esc(c.name)}</h1>${c.virtual ? tag('가상 법인', 't-muted') : ''}</div>
+  <p class="sub"><a href="#/corporates">← 법인 목록</a> · 사업자번호 ${esc(c.bizRegNo)} · ${esc(c.industry)} (업종 위험 ${c.industryRiskGrade}등급) · 대표 ${esc(c.representative)}</p>
+  <div class="card"><h2>단체 가입설계 <span class="small muted">하나의 플랜을 종업원 전원에게 적용 · 개인별 보험나이 요율 · 5명 이상 · 10/50/100명 이상 단체 할인 5/10/15%</span></h2>
+    <div id="g-prod"></div><div id="g-form"></div><div class="error" id="g-err" hidden></div></div>
+  <div id="g-quote"></div>
+  ${d.groupProposals.length ? `<div class="card"><h2>단체 설계서</h2>${table(['설계번호', '상품', '가입 인원', '월 보험료(법인)', '발행', '유효기간'], d.groupProposals.map((g) => `
+    <tr class="click" data-href="#/group-proposals/${g.id}"><td>${esc(g.proposalNo)}</td><td>${esc(g.productName)}</td><td class="num">${g.insuredCount}명</td>
+    <td class="num">${won(g.monthlyPremium)}</td><td class="small">${dt(g.issuedAt)}</td><td>${g.validUntil}</td></tr>`))}</div>` : ''}
+  <div class="card"><h2>종업원 <span class="small muted">${d.members.length}명</span></h2>
+    ${table(['사번', '이름', '부서', '보험나이', '성별', '직무 (위험)', '운전', '입사일', ''], d.members.map((m) => `
+      <tr><td>${esc(m.employeeNo)}</td><td><a href="#/customers/${m.customerId}">${esc(m.name)}</a></td><td>${esc(m.department)}</td><td>${m.insuranceAge}세</td>
+      <td>${m.gender === 'M' ? '남' : '여'}</td><td class="small">${esc(m.occupation)} (${m.jobRiskGrade})</td><td class="small">${esc(m.drivingLabel)}</td>
+      <td class="small">${m.joinedOn}</td><td><button class="btn ghost sm m-del" data-id="${m.customerId}">제외</button></td></tr>`), '등록된 종업원이 없습니다.')}
+    <details style="margin-top:8px"><summary class="small">종업원 추가 (기존 개인고객)</summary>
+      <div id="m-picker"></div>
+      <div class="row"><div><label>부서</label><input id="m-dept" placeholder="예) 영업"></div></div>
+      <div class="actions"><button class="btn sm" id="m-save">종업원으로 등록</button></div></details>
+    <div class="error" id="m-err" hidden></div></div>`;
+  bindRows();
+  let member = null;
+  await customerPicker($('m-picker'), null, (x) => { member = x; });
+  $('m-save').onclick = async () => {
+    try {
+      if (!member) throw new Error('종업원으로 등록할 고객을 선택하세요.');
+      await post(`/core/corporates/${id}/members`, { customerId: member.id, department: $('m-dept').value.trim() });
+      route();
+    } catch (e) { showError($('m-err'), e); }
+  };
+  view.querySelectorAll('.m-del').forEach((b) => (b.onclick = async () => {
+    try { await del(`/core/corporates/${id}/members/${b.dataset.id}`); route(); } catch (e) { showError($('m-err'), e); }
+  }));
+  await productPicker($('g-prod'), null, (p) => renderGroupForm(id, p));
+}
+
+function renderGroupForm(corporateId, product) {
+  $('g-quote').innerHTML = '';
+  if (!product) { $('g-form').innerHTML = ''; return; }
+  const covs = product.coverages.filter((c) => !c.accumulation);
+  if (product.savings || !covs.length) {
+    $('g-form').innerHTML = '<div class="notice">단체 설계는 보장성 상품만 가능합니다 (저축·변액은 개인 설계).</div>';
+    return;
+  }
+  $('g-form').innerHTML = `
+    <h3 style="margin-top:12px">${esc(product.summary.name)}</h3>
+    <div class="row"><div><label>납입기간</label><select id="g-term">${product.summary.paymentTerms.map((t) => `<option value="${t}" ${t === 20 ? 'selected' : ''}>${t === 1 ? '1년 갱신' : t + '년납'}</option>`).join('')}</select></div></div>
+    ${product.plans.length ? `<div class="plans"><span class="small muted">플랜</span>${product.plans.map((pl) => `<button class="btn ghost sm plan" data-id="${pl.id}">${esc(pl.name)}</button>`).join('')}</div>` : ''}
+    ${table(['가입', '담보', '가입금액'], covs.map((c) => `<tr><td><input type="checkbox" class="cov" value="${c.id}" ${c.required ? 'checked disabled' : 'checked'}></td>
+      <td>${esc(c.name)} ${c.required ? tag('주계약', 't-info') : tag('특약', 't-muted')}</td>
+      <td><select class="amt" data-id="${c.id}" style="max-width:160px">${amountOptions(c)}</select></td></tr>`))}
+    <div id="rule-msg" class="small t-info"></div>
+    <div class="actions" style="margin-top:10px"><button class="btn" id="g-calc">단체 보험료 계산</button></div>`;
+  bindRiderRules(product);
+  activeView.querySelectorAll('.plan').forEach((b) => (b.onclick = () => {
+    applyCoverages(product.plans.find((x) => String(x.id) === b.dataset.id).items);
+    activeView.querySelectorAll('.plan').forEach((x) => x.classList.toggle('on', x === b));
+  }));
+  const body = () => ({
+    corporateId: Number(corporateId), productId: product.summary.id, paymentTerm: Number($('g-term').value),
+    items: [...activeView.querySelectorAll('.cov:checked')].map((cb) => ({
+      coverageId: Number(cb.value), amount: Number(activeView.querySelector(`.amt[data-id="${cb.value}"]`).value) })),
+  });
+  $('g-calc').onclick = async () => {
+    $('g-err').hidden = true;
+    $('g-calc').disabled = true;
+    try {
+      const q = await post('/core/group-proposals/quote', body());
+      $('g-quote').innerHTML = `<div class="card">${groupQuoteView(q)}
+        <div class="actions" style="margin-top:12px"><button class="btn" id="g-issue">단체 설계서 발행</button></div>
+        <div class="error" id="gi-err" hidden></div></div>`;
+      $('g-issue').onclick = async () => {
+        try { const g = await post('/core/group-proposals', body()); location.hash = `#/group-proposals/${g.id}`; } catch (e) { showError($('gi-err'), e); }
+      };
+    } catch (e) { showError($('g-err'), e); } finally { $('g-calc').disabled = false; }
+  };
+}
+
+function groupQuoteView(q) {
+  const excluded = q.lines.filter((l) => !l.included);
+  return `<h2>단체 보험료 ${q.proposalNo ? `<span class="small muted">${esc(q.proposalNo)} · 발행 ${dt(q.issuedAt)} · 유효 ~${q.validUntil}</span>` : ''}</h2>
+    <p>법인 월 보험료 <span class="big">${won(q.monthlyPremium)}</span>
+      <span class="small muted">· 가입 ${q.insuredCount}명 / 제외 ${q.excludedCount}명 · 개인별 합계 ${won(q.grossPremium)} − 단체 할인 ${q.discountPct}%</span></p>
+    ${excluded.length ? `<div class="notice">가입 제외 ${excluded.length}명: ${[...new Set(excluded.map((l) => l.excludedReason))].map(esc).join(' / ')}</div>` : ''}
+    ${table(['사번', '이름', '보험나이', '가입', '월 보험료', '제외 사유'], q.lines.map((l) => `<tr><td>${esc(l.employeeNo || '')}</td>
+      <td><a href="#/customers/${l.customerId}">${esc(l.name)}</a></td><td>${l.insuranceAge}세</td><td>${l.included ? tag('가입', 't-ok') : tag('제외', 't-bad')}</td>
+      <td class="num">${l.included ? won(l.monthlyPremium) : '-'}</td><td class="small">${esc(l.excludedReason || '')}</td></tr>`))}`;
+}
+
+async function groupProposalDetail(params, id) {
+  const view = activeView;
+  const q = await api(`/core/group-proposals/${id}`);
+  view.innerHTML = `<h1>단체 설계서 — ${esc(q.corporateName)}</h1>
+    <p class="sub"><a href="#/corporates/${q.corporateId}">← 법인으로</a> · ${esc(q.productName)} · ${q.paymentTerm === 1 ? '1년 갱신' : q.paymentTerm + '년납'}</p>
+    <div class="card">${groupQuoteView(q)}</div>`;
 }
 
 // ============================================================ 청약

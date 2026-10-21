@@ -26,7 +26,9 @@ public class CustomerService {
     private final RrnAccessLogRepository rrnAccessLogRepository;
     private final ResidentNumbers residentNumbers;
 
-    public record VirtualSpec(Integer minAge, Integer maxAge, Gender gender, ConsumerType consumerType, DrivingType driving) {
+    /** occupation·jobRiskGrade 를 주지 않으면 직업도 무작위 (법인 종업원 생성 시 업종 직무를 지정) */
+    public record VirtualSpec(Integer minAge, Integer maxAge, Gender gender, ConsumerType consumerType, DrivingType driving,
+                              String occupation, Integer jobRiskGrade) {
     }
 
     /** 신규 고객: 실제 주민번호는 받지 않고 생년월일·성별로 가상 주민번호를 만들어 암호화 저장한다. */
@@ -54,7 +56,8 @@ public class CustomerService {
         LocalDate to = today.minusYears(min);
         LocalDate birth = from.plusDays(rnd.nextLong(to.toEpochDay() - from.toEpochDay() + 1));
         Gender gender = spec.gender() != null ? spec.gender() : rnd.nextBoolean() ? Gender.M : Gender.F;
-        Object[] job = birth.isAfter(today.minusYears(19)) ? new Object[] {"학생", 1} : JOBS[rnd.nextInt(JOBS.length)];
+        Object[] job = spec.occupation() != null ? new Object[] {spec.occupation(), spec.jobRiskGrade() == null ? 1 : spec.jobRiskGrade()}
+                : birth.isAfter(today.minusYears(19)) ? new Object[] {"학생", 1} : JOBS[rnd.nextInt(JOBS.length)];
         DrivingType driving = spec.driving() != null ? spec.driving()
                 : birth.isAfter(today.minusYears(19)) ? DrivingType.NONE : DrivingType.values()[rnd.nextInt(3)];
         String name = SURNAMES[rnd.nextInt(SURNAMES.length)] + GIVEN[rnd.nextInt(GIVEN.length)] + GIVEN[rnd.nextInt(GIVEN.length)];

@@ -572,6 +572,50 @@ def _():
     return f"{p['investmentProfileLabel']} 진단 → {p['suitabilityLabel']}"
 
 
+def corporate(name):
+    return next(c for c in call("GET", "/corporates?q=" + urllib.parse.quote(name))["content"] if c["name"] == name)
+
+
+@scenario("S26 법인 단체설계: Ax테크(30명) 건강보험 표준형 → 개인별 요율 합계 − 단체 할인 5% → 단체 설계서 발행")
+def _():
+    corp = corporate("Ax테크(가상)")
+    hp = product("HEALTH", lambda x: not x["simplifiedUw"] and x["minEntryAge"] <= 20 and x["maxEntryAge"] >= 63)
+    plan = next(p for p in hp["plans"] if p["name"] == "표준형")
+    body = {"corporateId": corp["id"], "productId": hp["summary"]["id"], "paymentTerm": 20, "items": plan["items"]}
+    q = call("POST", "/group-proposals/quote", body)
+    assert q["insuredCount"] >= 10 and q["discountPct"] == 5, (q["insuredCount"], q["discountPct"])
+    assert q["grossPremium"] == sum(l["monthlyPremium"] for l in q["lines"] if l["included"])
+    assert abs(q["monthlyPremium"] - q["grossPremium"] * 0.95) <= 10, (q["monthlyPremium"], q["grossPremium"])
+    g = call("POST", "/group-proposals", body)
+    assert g["proposalNo"].startswith("GP") and len(g["lines"]) == len(q["lines"])
+    assert any(x["id"] == g["id"] for x in call("GET", f"/corporates/{corp['id']}")["groupProposals"])
+    return f"{q['insuredCount']}명 {q['grossPremium']:,}원 → 할인 {q['discountPct']}% → {q['monthlyPremium']:,}원"
+
+
+@scenario("S27 단체설계 제외·최소 인원: 운전자보험은 비운전 종업원 제외 / 소담카페(4명)는 5명 미달로 불가")
+def _():
+    corp = call("POST", "/corporates/virtual", {"industry": "물류·운송", "employees": 20})
+    members = call("GET", f"/corporates/{corp['id']}")["members"]
+    assert len(members) == 20
+    # 비운전 종업원 1명을 확실히 만든다
+    m = members[0]
+    cust = call("GET", f"/customers/{m['customerId']}")["customer"]
+    call("PUT", f"/customers/{cust['id']}", {"name": cust["name"], "phone": cust["phone"], "consumerType": cust["consumerType"],
+                                             "occupation": cust["occupation"], "jobRiskGrade": cust["jobRiskGrade"], "driving": "NONE"})
+    drv = product("DRIVER", lambda x: not x["simplifiedUw"])
+    items = [{"coverageId": c["id"], "amount": c["defaultAmount"]} for c in drv["coverages"] if c["required"]]
+    q = call("POST", "/group-proposals/quote", {"corporateId": corp["id"], "productId": drv["summary"]["id"], "paymentTerm": 20, "items": items})
+    excluded = [l for l in q["lines"] if not l["included"]]
+    assert any(l["customerId"] == cust["id"] and "비운전자" in l["excludedReason"] for l in excluded), excluded
+    cafe = corporate("소담카페(가상)")
+    try:
+        call("POST", "/group-proposals/quote", {"corporateId": cafe["id"], "productId": drv["summary"]["id"], "paymentTerm": 20, "items": items})
+        raise AssertionError("4명 법인이 단체 설계됨")
+    except ApiError as e:
+        assert "5명 이상" in str(e.detail), e.detail
+    return f"제외 {len(excluded)}명(비운전·나이 등), 4명 법인 차단"
+
+
 if __name__ == "__main__":
     width = max(len(r[1]) for r in results)
     for status, name, note, sec in results:

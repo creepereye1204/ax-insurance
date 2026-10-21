@@ -165,7 +165,7 @@ public class CustomerController {
     @PostMapping("/virtual")
     @ResponseStatus(HttpStatus.CREATED)
     public Response createVirtual(@RequestBody(required = false) CustomerService.VirtualSpec spec) {
-        return Response.from(customerService.createVirtual(spec == null ? new CustomerService.VirtualSpec(null, null, null, null, null) : spec));
+        return Response.from(customerService.createVirtual(spec == null ? new CustomerService.VirtualSpec(null, null, null, null, null, null, null) : spec));
     }
 
     /** 주민번호 원문 열람 (가상 번호, 사유 필수 · 감사 로그) */

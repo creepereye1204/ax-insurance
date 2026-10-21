@@ -22,6 +22,8 @@ import com.ax.core.common.TreatmentType;
 import com.ax.core.contract.Contract;
 import com.ax.core.contract.ContractCoverage;
 import com.ax.core.contract.ContractRepository;
+import com.ax.core.corporate.CorporateRepository;
+import com.ax.core.corporate.CorporateService;
 import com.ax.core.customer.ConsumerType;
 import com.ax.core.customer.Customer;
 import com.ax.core.customer.CustomerRepository;
@@ -89,6 +91,8 @@ public class DemoDataLoader implements ApplicationRunner {
     private final UwRuleSetRepository ruleSetRepository;
     private final CoverageRuleRepository coverageRuleRepository;
     private final ProductPlanRepository planRepository;
+    private final CorporateRepository corporateRepository;
+    private final CorporateService corporateService;
     private final CustomerRepository customerRepository;
     private final ExternalMedicalRecordRepository externalRecords;
     private final ContractRepository contractRepository;
@@ -152,6 +156,13 @@ public class DemoDataLoader implements ApplicationRunner {
             }
             planRepository.saveAll(plans);
             log.info("상품 기본 플랜 {}건 등록", plans.size());
+        }
+        if (corporateRepository.count() == 0) {
+            // 시나리오 법인: 일반 단체(30명) / 고위험 업종 대규모(60명) / 단체 최소 인원 미달(4명)
+            corporateService.createVirtual("Ax테크(가상)", "IT 서비스", 30);
+            corporateService.createVirtual("한빛물류(가상)", "물류·운송", 60);
+            corporateService.createVirtual("소담카페(가상)", "요식업", 4);
+            log.info("시나리오 법인 3곳 등록 (종업원 94명)");
         }
     }
 
