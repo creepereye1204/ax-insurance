@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -35,6 +36,7 @@ public class ProductController {
     private final FundRepository fundRepository;
     private final CoverageRuleRepository ruleRepository;
     private final PlanService planService;
+    private final ProductPlanRepository planRepository;
 
     public record TypeResponse(String code, String label, boolean savings, boolean variable) {
     }
@@ -83,7 +85,12 @@ public class ProductController {
                          List<PlanResponse> plans) {
     }
 
-    public record PageResponse(List<Summary> content, int page, int totalPages, long totalElements) {
+    /** 목록 카드용 플랜 요약 (담보 구성은 상세에서) */
+    public record PlanTag(Long id, String name, boolean custom, int coverageCount) {
+    }
+
+    public record PageResponse(List<Summary> content, int page, int totalPages, long totalElements,
+                               Map<Long, List<PlanTag>> plans) {
     }
 
     @GetMapping("/types")
@@ -102,7 +109,18 @@ public class ProductController {
         Page<Product> found = productRepository.search(type, q.trim(), onSaleOnly,
                 PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), Sort.by("type", "name")));
         return new PageResponse(found.map(Summary::from).getContent(), found.getNumber(), found.getTotalPages(),
-                found.getTotalElements());
+                found.getTotalElements(), planTags(found.map(Product::getId).getContent()));
+    }
+
+    /** 페이지에 담긴 상품들의 플랜을 한 번에 조회 (상품마다 조회하지 않는다) */
+    private Map<Long, List<PlanTag>> planTags(Collection<Long> productIds) {
+        if (productIds.isEmpty()) {
+            return Map.of();
+        }
+        return planRepository.findByProductIdInOrderByCustomAscIdAsc(productIds).stream()
+                .collect(Collectors.groupingBy(pl -> pl.getProduct().getId(),
+                        Collectors.mapping(pl -> new PlanTag(pl.getId(), pl.getName(), pl.isCustom(), pl.getItems().size()),
+                                Collectors.toList())));
     }
 
     @GetMapping("/{id}")

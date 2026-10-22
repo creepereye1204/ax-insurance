@@ -589,6 +589,9 @@ async function products(params) {
         <b class="pcard-name">${esc(p.name)}</b>
         <dl class="pcard-kv"><dt>가입나이</dt><dd>${p.minEntryAge}~${p.maxEntryAge}세</dd><dt>납입</dt><dd>${termsText(p.paymentTerms)}</dd>
           <dt>보험기간</dt><dd>${esc(p.insurancePeriod)}</dd><dt>담보</dt><dd>${p.coverageCount}개</dd></dl>
+        ${(data.plans?.[p.id] || []).length && p.saleStatus === 'ON_SALE' ? `<div class="mini-plans">${data.plans[p.id].map((pl) => `
+          <a class="mini-plan ${pl.custom ? 'custom' : ''}" href="#/design?product=${p.id}&plan=${pl.id}" title="이 플랜으로 설계 시작">
+            <b>${esc(pl.name)}</b><span>담보 ${pl.coverageCount}개</span></a>`).join('')}</div>` : ''}
         <div class="pcard-foot"><span class="small muted">${esc(p.code)}</span>
           ${p.saleStatus === 'ON_SALE' ? `<a class="btn sm" href="#/design?product=${p.id}">설계</a>` : ''}</div>
       </div>`).join('') || '<div class="empty">조건에 맞는 상품이 없습니다.</div>'}</div>
@@ -613,7 +616,12 @@ async function design(params) {
   <div class="card"><h2>2. 상품</h2><div id="prod"></div></div>
   <div id="form"></div><div id="quote"></div>`;
   let customer = null, product = null;
-  const refresh = () => renderDesignForm(customer, product);
+  let pendingPlan = params.get('plan');   // 상품 목록에서 플랜 카드를 눌러 들어온 경우
+  const refresh = () => {
+    renderDesignForm(customer, product);
+    const b = pendingPlan && document.querySelector(`#form .plan[data-id="${pendingPlan}"]`);
+    if (b) { b.click(); pendingPlan = null; }
+  };
   await customerPicker($('cust'), params.get('customer'), (c) => { customer = c; refresh(); });
   await productPicker($('prod'), params.get('product'), (p) => { product = p; refresh(); });
 }
