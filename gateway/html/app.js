@@ -67,7 +67,7 @@ function planCards(product, deletable) {
       ${deletable && pl.custom ? `<button type="button" class="plan-del" data-id="${pl.id}" title="저장한 플랜 삭제">×</button>` : ''}</div>`;
   }).join('')}</div>`;
 }
-const outcomeTag = (o) => { const [l, c, light] = OUTCOME[o] || [o, 't-muted', 'b']; return `<span class="light ${light}"></span>${tag(l, c)}`; };
+const outcomeTag = (o, light = true) => { const [l, c, dot] = OUTCOME[o] || [o, 't-muted', 'b']; return `${light ? `<span class="light ${dot}"></span>` : ''}${tag(l, c)}`; };
 const rules = (list) => (list || []).map((r) => `<span class="rule">${esc(r)}</span>`).join(' ');
 const exclusionText = (ex) => (ex || []).map((e) => `부담보: ${esc(e.label)} ${e.months ? e.months + '개월' : '~' + esc(e.until)}`).join('<br>');
 const DRIVING = { NONE: '비운전', PRIVATE: '자가용', COMMERCIAL: '영업용', MOTORCYCLE: '이륜자동차' };
@@ -112,7 +112,7 @@ function disclosureQuestions(qn) {
   return qn.questions.map((q) => `
     <div class="question" data-qid="${q.id}" data-detail="${q.detailRequired}">
       <div class="q">${esc(q.code)}. ${esc(q.text)} ${q.lookbackMonths ? `<small>(최근 ${q.lookbackMonths}개월)</small>` : ''}</div>
-      <div class="yn"><label><input type="radio" name="q${q.id}" value="false" checked> 아니오</label>
+      <div class="yn"><label><input type="radio" name="q${q.id}" value="false"> 아니오</label>
         <label><input type="radio" name="q${q.id}" value="true"> 예</label></div>
       <div class="details"></div>
       ${q.detailRequired ? '<button class="btn ghost sm add" hidden style="margin-top:8px">+ 상세 추가</button>' : ''}
@@ -143,7 +143,16 @@ function bindDisclosure(root) {
     }));
     if (add) add.onclick = () => details.append(detailRow());
   });
-  return () => [...root.querySelectorAll('.question')].map((qEl) => ({
+  // 고지는 미리 체크해 두지 않는다 — 고객이 문항마다 직접 답해야 한다
+  root.addEventListener('change', (e) => e.target.closest('.question')?.classList.remove('missing'));
+  return () => {
+    const missing = [...root.querySelectorAll('.question')].filter((qEl) => !qEl.querySelector('input[type=radio]:checked'));
+    missing.forEach((qEl) => qEl.classList.add('missing'));
+    if (missing.length) {
+      missing[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      throw new Error(`답하지 않은 고지 문항이 ${missing.length}개 있습니다: ${missing.map((q) => q.querySelector('.q').textContent.split('.')[0].trim()).join(', ')}`);
+    }
+    return [...root.querySelectorAll('.question')].map((qEl) => ({
     questionId: Number(qEl.dataset.qid),
     answer: qEl.querySelector('input[type=radio]:checked').value === 'true',
     details: [...qEl.querySelectorAll('.detail-row')].map((d) => ({
@@ -151,7 +160,8 @@ function bindDisclosure(root) {
       treatment: d.querySelector('.d-treat').value, treatmentDays: Number(d.querySelector('.d-days').value || 0),
       cured: d.querySelector('.d-cured').value === 'true',
     })),
-  }));
+    }));
+  };
 }
 
 /** 심사 신호등: GREEN 표준체 / YELLOW 조건부·본사 심사 / RED 연기·거절 */
@@ -209,33 +219,48 @@ async function customerPicker(el, selectedId, onChange) {
 // ------------------------------------------------------------ 상품 선택기
 async function productPicker(el, selectedId, onChange) {
   const types = await productTypes();
-  el.innerHTML = `
-    <div class="row"><div><label>상품 유형</label><select class="p-type"><option value="">전체</option>
-      ${types.map((t) => `<option value="${t.code}">${esc(t.label)}</option>`).join('')}</select></div>
-      <div><label>상품명 검색</label><input class="p-q" placeholder="예: 든든, 간편심사형"></div></div>
-    <div class="pgrid compact p-list"></div>`;
-  const list = el.querySelector('.p-list');
-  async function load() {
-    const type = el.querySelector('.p-type').value, q = el.querySelector('.p-q').value.trim();
-    const page = await api(`/core/products?size=100${type ? '&type=' + type : ''}&q=${encodeURIComponent(q)}`);
-    list.innerHTML = page.content.map((p) => `<div class="pcard item pt-${p.type} ${String(p.id) === String(selectedId) ? 'on' : ''}" data-id="${p.id}">
-      <div class="pcard-top">${typeBadge(p)}${p.simplifiedUw ? tag('간편심사', 't-warn') : ''}</div>
-      <b class="pcard-name">${esc(p.name)}</b>
-      <div class="pcard-meta">보험나이 ${p.minEntryAge}~${p.maxEntryAge}세 · ${termsText(p.paymentTerms)} · ${esc(p.insurancePeriod)}</div></div>`).join('')
-      || '<div class="empty">조건에 맞는 판매 중 상품이 없습니다.</div>';
-    const on = list.querySelector('.on');
-    if (on) list.scrollTop = on.offsetTop - list.offsetTop - 4;
-    list.querySelectorAll('.item').forEach((it) => (it.onclick = async () => {
-      selectedId = it.dataset.id;
-      list.querySelectorAll('.item').forEach((x) => x.classList.toggle('on', x === it));
-      onChange(await api(`/core/products/${selectedId}`));
-    }));
+  let filter = { type: '', q: '' };
+  // 고른 뒤에는 카드 하나로 접고 [변경]으로 다시 펼친다 (167개 목록이 화면을 차지하지 않게)
+  async function choose(id) {
+    const detail = await api(`/core/products/${id}`);
+    selectedId = id;
+    renderChosen(detail.summary);
+    onChange(detail);
   }
-  el.querySelector('.p-type').onchange = load;
-  let timer;
-  el.querySelector('.p-q').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
-  await load();
-  if (selectedId) onChange(await api(`/core/products/${selectedId}`));
+  function renderChosen(p) {
+    el.innerHTML = `<div class="chosen-product pcard pt-${p.type}">
+      <div class="pcard-top">${typeBadge(p)}${p.simplifiedUw ? tag('간편심사', 't-warn') : ''}<span class="spacer"></span>
+        <button class="btn ghost sm" type="button">변경</button></div>
+      <b class="pcard-name">${esc(p.name)}</b>
+      <div class="pcard-meta">보험나이 ${p.minEntryAge}~${p.maxEntryAge}세 · ${termsText(p.paymentTerms)} · ${esc(p.insurancePeriod)} · ${esc(p.code)}</div></div>`;
+    el.querySelector('button').onclick = () => { renderSearch(); onChange(null); };
+  }
+  function renderSearch() {
+    el.innerHTML = `
+      <div class="row"><div><label>상품 유형</label><select class="p-type"><option value="">전체</option>
+        ${types.map((t) => `<option value="${t.code}" ${t.code === filter.type ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select></div>
+        <div><label>상품명 검색</label><input class="p-q" value="${esc(filter.q)}" placeholder="예: 든든, 간편심사형"></div></div>
+      <div class="pgrid compact p-list"></div>`;
+    const list = el.querySelector('.p-list');
+    async function load() {
+      filter = { type: el.querySelector('.p-type').value, q: el.querySelector('.p-q').value.trim() };
+      const page = await api(`/core/products?size=100${filter.type ? '&type=' + filter.type : ''}&q=${encodeURIComponent(filter.q)}`);
+      list.innerHTML = page.content.map((p) => `<div class="pcard item pt-${p.type} ${String(p.id) === String(selectedId) ? 'on' : ''}" data-id="${p.id}">
+        <div class="pcard-top">${typeBadge(p)}${p.simplifiedUw ? tag('간편심사', 't-warn') : ''}</div>
+        <b class="pcard-name">${esc(p.name)}</b>
+        <div class="pcard-meta">보험나이 ${p.minEntryAge}~${p.maxEntryAge}세 · ${termsText(p.paymentTerms)} · ${esc(p.insurancePeriod)}</div></div>`).join('')
+        || '<div class="empty">조건에 맞는 판매 중 상품이 없습니다.</div>';
+      const on = list.querySelector('.on');
+      if (on) list.scrollTop = on.offsetTop - list.offsetTop - 4;
+      list.querySelectorAll('.item').forEach((it) => (it.onclick = () => choose(it.dataset.id)));
+    }
+    el.querySelector('.p-type').onchange = load;
+    let timer;
+    el.querySelector('.p-q').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+    return load();
+  }
+  if (selectedId) await choose(selectedId);
+  else await renderSearch();
 }
 
 // ============================================================ 라우터
@@ -924,6 +949,7 @@ async function preUw(params) {
   await productPicker($('prod'), params.get('product'), async (p) => { product = p; await loadQuestionnaire(); });
   $('run').onclick = async () => {
     $('err').hidden = true;
+    $('run').disabled = true; $('run').textContent = '심사 중…';
     try {
       if (!customer || !product) throw new Error('고객과 상품을 선택하세요.');
       const useDisc = $('use-disc').checked;
@@ -942,7 +968,7 @@ async function preUw(params) {
       <div class="card"><h2>예상 결과 · ${esc(c.customerName)} · ${esc(c.productName)} ${uwTypeTag(c.simplifiedUw)} <span class="small muted">룰셋 v${c.ruleSetVersion}</span></h2>
         <div class="signal-box">${signalLight(c.signal, c.signalLabel)}<p class="small">${esc(r.hint)}</p></div>
         ${table(['', '담보', '예상 결과', '조건', '적용 룰', '사유'], c.results.map((x) => `
-          <tr><td>${signalDot(x.signal)}</td><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome)}</td>
+          <tr><td>${signalDot(x.signal)}</td><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome, false)}</td>
           <td class="small">${exclusionText(x.exclusions)}${x.ratingPct ? `할증 ${x.ratingPct}%` : ''}</td>
           <td>${rules(x.matchedRules)}</td><td class="small">${x.reasons.map(esc).join('<br>')}</td></tr>`))}
         <div class="actions" style="margin-top:12px"><a class="btn" href="#/design?customer=${c.customerId}&product=${product.summary.id}">이 상품으로 가입설계</a></div></div>
@@ -954,7 +980,9 @@ async function preUw(params) {
         ${table(['출처', '질병코드', '진단일', '치료', '완치'], r.inquired.map((m) => `
           <tr><td class="small">${esc(m.source)}</td><td><span class="rule">${esc(m.kcdCode)}</span></td><td>${m.diagnosedOn}</td>
           <td>${TREATMENT[m.treatment] || esc(m.treatment)}</td><td>${m.cured ? '예' : '아니오'}</td></tr>`), '조회하지 않았거나 조회된 이력이 없습니다.')}</div>`;
+      $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) { showError($('err'), e); }
+    finally { $('run').disabled = false; $('run').textContent = '선심사 실행'; }
   };
 }
 
@@ -1142,7 +1170,7 @@ async function apply(params) {
       $('sim').innerHTML = `<h2 style="margin-top:16px">전산심사 결과 ${tag(r.verdict, cls)} <span class="small muted">룰셋 v${r.ruleSetVersion} · 저장되지 않은 사전 결과</span></h2>
         <div class="signal-box">${signalLight(r.signal, r.signalLabel)}</div>
         ${table(['', '담보', '결과', '조건', '적용 룰', '사유'], r.coverages.map((x) => `
-          <tr><td>${signalDot(x.signal)}</td><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome)}</td>
+          <tr><td>${signalDot(x.signal)}</td><td>${esc(x.coverageName)}</td><td>${outcomeTag(x.outcome, false)}</td>
           <td class="small">${exclusionText(x.exclusions)}${x.ratingPct ? `할증 ${x.ratingPct}%` : ''}</td>
           <td>${rules(x.matchedRules)}</td><td class="small">${x.reasons.map(esc).join('<br>')}</td></tr>`))}`;
     } catch (e) { showError($('err1'), e); }
