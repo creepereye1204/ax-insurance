@@ -47,6 +47,26 @@ const CLAIM_STATUS = {
 };
 const TREATMENT = { OUTPATIENT: '외래', INPATIENT: '입원', SURGERY: '수술', MEDICATION: '투약' };
 const tag = (label, cls) => `<span class="tag ${cls}">${esc(label)}</span>`;
+
+// 상품 유형별 색·아이콘 (색은 app.css 의 .pt-유형 에서 --pt 로 정한다)
+const TYPE_GLYPH = { WHOLE_LIFE: '종', TERM_LIFE: '정', HEALTH: '건', CANCER: '암', MEDICAL: '실', CHILD: '아', DRIVER: '운',
+  DENTAL: '치', ANNUITY: '연', VARIABLE_ANNUITY: '변', VARIABLE_UNIVERSAL: '유', SAVINGS: '저' };
+const typeBadge = (p) => `<span class="pt-badge"><span class="pt-icon">${TYPE_GLYPH[p.type] || '상'}</span>${esc(p.typeLabel)}</span>`;
+const termsText = (terms) => terms.map((t) => (t === 1 ? '1년갱신' : t + '년납')).join('/');
+
+// 플랜은 두꺼운 테두리 카드로 보여 준다. 저장한(사용자) 플랜은 점선 테두리.
+function planCards(product, deletable) {
+  const names = new Map(product.coverages.map((c) => [c.id, c.name]));
+  return `<div class="plan-cards">${product.plans.map((pl) => {
+    return `<div class="plan-card ${pl.custom ? 'custom' : ''}">
+      <button type="button" class="plan" data-id="${pl.id}" title="${esc(pl.items.map((it) => `${names.get(it.coverageId) || ''} ${amountText(it.amount)}`).join('\n'))}">
+        <span class="pc-name">${esc(pl.name)}${pl.custom ? ' <small>내 플랜</small>' : ''}</span>
+        <span class="pc-meta">담보 ${pl.items.length}개</span>
+        ${pl.description ? `<span class="pc-desc">${esc(pl.description)}</span>` : ''}
+      </button>
+      ${deletable && pl.custom ? `<button type="button" class="plan-del" data-id="${pl.id}" title="저장한 플랜 삭제">×</button>` : ''}</div>`;
+  }).join('')}</div>`;
+}
 const outcomeTag = (o) => { const [l, c, light] = OUTCOME[o] || [o, 't-muted', 'b']; return `<span class="light ${light}"></span>${tag(l, c)}`; };
 const rules = (list) => (list || []).map((r) => `<span class="rule">${esc(r)}</span>`).join(' ');
 const exclusionText = (ex) => (ex || []).map((e) => `부담보: ${esc(e.label)} ${e.months ? e.months + '개월' : '~' + esc(e.until)}`).join('<br>');
@@ -193,15 +213,18 @@ async function productPicker(el, selectedId, onChange) {
     <div class="row"><div><label>상품 유형</label><select class="p-type"><option value="">전체</option>
       ${types.map((t) => `<option value="${t.code}">${esc(t.label)}</option>`).join('')}</select></div>
       <div><label>상품명 검색</label><input class="p-q" placeholder="예: 든든, 간편심사형"></div></div>
-    <div class="list-select p-list"></div>`;
+    <div class="pgrid compact p-list"></div>`;
   const list = el.querySelector('.p-list');
   async function load() {
     const type = el.querySelector('.p-type').value, q = el.querySelector('.p-q').value.trim();
     const page = await api(`/core/products?size=100${type ? '&type=' + type : ''}&q=${encodeURIComponent(q)}`);
-    list.innerHTML = page.content.map((p) => `<div class="item ${String(p.id) === String(selectedId) ? 'on' : ''}" data-id="${p.id}">
-      <b>${esc(p.name)}</b> ${p.simplifiedUw ? tag('간편심사', 't-warn') : ''}
-      <div class="small muted">${esc(p.typeLabel)} · 보험나이 ${p.minEntryAge}~${p.maxEntryAge}세 · ${p.paymentTerms.map((t) => (t === 1 ? '1년갱신' : t + '년납')).join('/')} · ${esc(p.insurancePeriod)} · ${esc(p.code)}</div></div>`).join('')
+    list.innerHTML = page.content.map((p) => `<div class="pcard item pt-${p.type} ${String(p.id) === String(selectedId) ? 'on' : ''}" data-id="${p.id}">
+      <div class="pcard-top">${typeBadge(p)}${p.simplifiedUw ? tag('간편심사', 't-warn') : ''}</div>
+      <b class="pcard-name">${esc(p.name)}</b>
+      <div class="pcard-meta">보험나이 ${p.minEntryAge}~${p.maxEntryAge}세 · ${termsText(p.paymentTerms)} · ${esc(p.insurancePeriod)}</div></div>`).join('')
       || '<div class="empty">조건에 맞는 판매 중 상품이 없습니다.</div>';
+    const on = list.querySelector('.on');
+    if (on) list.scrollTop = on.offsetTop - list.offsetTop - 4;
     list.querySelectorAll('.item').forEach((it) => (it.onclick = async () => {
       selectedId = it.dataset.id;
       list.querySelectorAll('.item').forEach((x) => x.classList.toggle('on', x === it));
@@ -560,11 +583,15 @@ async function products(params) {
       <div><label>검색</label><input id="pq" value="${esc(q)}"></div>
       <div><label>&nbsp;</label><label style="display:flex;gap:6px;color:var(--ink)"><input type="checkbox" id="pa" ${all ? 'checked' : ''}> 판매중지 포함</label></div>
     </form>
-    ${table(['코드', '상품명', '유형', '가입나이', '납입', '보험기간', '담보', '판매', ''], data.content.map((p) => `
-      <tr><td class="small">${esc(p.code)}</td><td><b>${esc(p.name)}</b></td><td>${esc(p.typeLabel)}</td><td>${p.minEntryAge}~${p.maxEntryAge}세</td>
-      <td class="small">${p.paymentTerms.map((t) => (t === 1 ? '1년갱신' : t + '년')).join(', ')}</td><td class="small">${esc(p.insurancePeriod)}</td>
-      <td>${p.coverageCount}</td><td>${p.saleStatus === 'ON_SALE' ? tag('판매중', 't-ok') : tag('판매중지', 't-muted')}</td>
-      <td>${p.saleStatus === 'ON_SALE' ? `<a class="btn ghost sm" href="#/design?product=${p.id}">설계</a>` : ''}</td></tr>`))}
+    <div class="pgrid">${data.content.map((p) => `
+      <div class="pcard pt-${p.type} ${p.saleStatus === 'ON_SALE' ? '' : 'off'}">
+        <div class="pcard-top">${typeBadge(p)}${p.simplifiedUw ? tag('간편심사', 't-warn') : ''}${p.saleStatus === 'ON_SALE' ? '' : tag('판매중지', 't-muted')}</div>
+        <b class="pcard-name">${esc(p.name)}</b>
+        <dl class="pcard-kv"><dt>가입나이</dt><dd>${p.minEntryAge}~${p.maxEntryAge}세</dd><dt>납입</dt><dd>${termsText(p.paymentTerms)}</dd>
+          <dt>보험기간</dt><dd>${esc(p.insurancePeriod)}</dd><dt>담보</dt><dd>${p.coverageCount}개</dd></dl>
+        <div class="pcard-foot"><span class="small muted">${esc(p.code)}</span>
+          ${p.saleStatus === 'ON_SALE' ? `<a class="btn sm" href="#/design?product=${p.id}">설계</a>` : ''}</div>
+      </div>`).join('') || '<div class="empty">조건에 맞는 상품이 없습니다.</div>'}</div>
     <div class="actions" style="margin-top:10px">
       ${page > 0 ? `<a class="btn ghost sm" href="${link({ page: page - 1 })}">이전</a>` : ''}
       <span class="small muted">${page + 1} / ${data.totalPages}</span>
@@ -606,8 +633,8 @@ function renderDesignForm(customer, product, restore = null) {
   const age = customer.insuranceAge;
   const ageOk = age >= s.minEntryAge && age <= s.maxEntryAge;
   form.innerHTML = `
-  <div class="card"><h2>3. 설계 — ${esc(s.name)}</h2>
-    <p class="small muted">${esc(s.typeLabel)} · 가입나이(보험나이) ${s.minEntryAge}~${s.maxEntryAge}세 · 보험기간 ${esc(s.insurancePeriod)}
+  <div class="card typed pt-${s.type}"><h2>${typeBadge(s)} 3. 설계 — ${esc(s.name)}</h2>
+    <p class="small muted">가입나이(보험나이) ${s.minEntryAge}~${s.maxEntryAge}세 · 보험기간 ${esc(s.insurancePeriod)}
       ${ageOk ? '' : ` · <span class="t-bad">고객 보험나이(${age}세)로는 가입할 수 없습니다</span>`}</p>
     <div class="row">
       <div><label>납입기간</label><select id="term">${s.paymentTerms.map((t) => `<option value="${t}" ${t === 20 ? 'selected' : ''}>${t === 1 ? '1년 갱신' : t + '년납'}</option>`).join('')}</select></div>
@@ -616,9 +643,7 @@ function renderDesignForm(customer, product, restore = null) {
       ${product.annuityStartAges ? `<div><label>연금개시나이</label><select id="annuity">${product.annuityStartAges.map((a) => `<option ${a === 65 ? 'selected' : ''}>${a}</option>`).join('')}</select></div>` : ''}
     </div>
     <div id="draft-box"></div>
-    ${hasCoverages && product.plans.length ? `<div class="plans"><span class="small muted">플랜</span>
-      ${product.plans.map((pl) => `<span class="plan-chip"><button class="btn ghost sm plan" data-id="${pl.id}" title="${esc(pl.description || '')}">${esc(pl.name)}</button>${pl.custom ? `<button class="plan-del" data-id="${pl.id}" title="저장한 플랜 삭제">×</button>` : ''}</span>`).join('')}
-      <span id="plan-applied" class="small muted"></span></div>` : ''}
+    ${hasCoverages && product.plans.length ? `<div class="small muted" style="margin-top:6px">플랜 <span id="plan-applied"></span></div>${planCards(product, true)}` : ''}
     ${hasCoverages ? table(['가입', '담보', '분류', '가입금액'], product.coverages.filter((c) => !c.accumulation).map((c) => `
       <tr><td><input type="checkbox" class="cov" value="${c.id}" ${c.required ? 'checked disabled' : 'checked'}></td>
       <td>${esc(c.name)} ${c.required ? tag('주계약', 't-info') : tag('특약', 't-muted')}</td><td class="small">${esc(c.categoryLabel)}</td>
@@ -657,7 +682,7 @@ function renderDesignForm(customer, product, restore = null) {
     const pl = product.plans.find((x) => String(x.id) === b.dataset.id);
     applyCoverages(pl.items);
     planName = pl.name;
-    form.querySelectorAll('.plan').forEach((x) => x.classList.toggle('on', x === b));
+    form.querySelectorAll('.plan-card').forEach((x) => x.classList.toggle('on', x.contains(b)));
     $('plan-applied').textContent = `'${pl.name}' 적용 — 담보·가입금액은 자유롭게 바꿀 수 있습니다`;
   }));
   form.querySelectorAll('.plan-del').forEach((b) => (b.onclick = async () => {
@@ -1010,18 +1035,18 @@ function renderGroupForm(corporateId, product) {
     return;
   }
   $('g-form').innerHTML = `
-    <h3 style="margin-top:12px">${esc(product.summary.name)}</h3>
+    <div class="typed pt-${product.summary.type}"><h3 style="margin-top:12px">${typeBadge(product.summary)} ${esc(product.summary.name)}</h3>
     <div class="row"><div><label>납입기간</label><select id="g-term">${product.summary.paymentTerms.map((t) => `<option value="${t}" ${t === 20 ? 'selected' : ''}>${t === 1 ? '1년 갱신' : t + '년납'}</option>`).join('')}</select></div></div>
-    ${product.plans.length ? `<div class="plans"><span class="small muted">플랜</span>${product.plans.map((pl) => `<button class="btn ghost sm plan" data-id="${pl.id}">${esc(pl.name)}</button>`).join('')}</div>` : ''}
+    ${product.plans.length ? `<div class="small muted">플랜</div>${planCards(product, false)}` : ''}
     ${table(['가입', '담보', '가입금액'], covs.map((c) => `<tr><td><input type="checkbox" class="cov" value="${c.id}" ${c.required ? 'checked disabled' : 'checked'}></td>
       <td>${esc(c.name)} ${c.required ? tag('주계약', 't-info') : tag('특약', 't-muted')}</td>
       <td><select class="amt" data-id="${c.id}" style="max-width:160px">${amountOptions(c)}</select></td></tr>`))}
     <div id="rule-msg" class="small t-info"></div>
-    <div class="actions" style="margin-top:10px"><button class="btn" id="g-calc">단체 보험료 계산</button></div>`;
+    <div class="actions" style="margin-top:10px"><button class="btn" id="g-calc">단체 보험료 계산</button></div></div>`;
   bindRiderRules(product);
   activeView.querySelectorAll('.plan').forEach((b) => (b.onclick = () => {
     applyCoverages(product.plans.find((x) => String(x.id) === b.dataset.id).items);
-    activeView.querySelectorAll('.plan').forEach((x) => x.classList.toggle('on', x === b));
+    activeView.querySelectorAll('.plan-card').forEach((x) => x.classList.toggle('on', x.contains(b)));
   }));
   const body = () => ({
     corporateId: Number(corporateId), productId: product.summary.id, paymentTerm: Number($('g-term').value),
