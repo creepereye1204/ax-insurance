@@ -695,6 +695,9 @@ function renderDesignForm(customer, product, restore = null) {
              <div style="margin-top:8px">${PROFILE_QUESTIONS.map(([q, opts], i) => `<div style="margin-bottom:6px"><label>${i + 1}. ${q}</label>
                <select class="pq" style="max-width:240px">${opts.map((o, j) => `<option value="${j + 1}">${o}</option>`).join('')}</select></div>`).join('')}
              <button class="btn sm" id="profile-now">오늘 진단 저장</button></div></div>`}` : ''}
+    ${hasCoverages ? `<div class="presim"><div class="actions"><button class="btn ghost" id="pre-run">선심사 · 비교설계</button>
+      <span class="small muted">설계 중에 바로 담보별 예상 결과를 보고, 심사 방식이 다른 상품(표준↔간편)과 비교합니다 · 정보조회 동의 기반</span></div>
+      <div id="presim"></div></div>` : ''}
     <div class="actions" style="margin-top:12px"><button class="btn" id="calc">보험료 계산</button>
       <button class="btn ghost" id="draft-save">임시저장</button>
       ${hasCoverages ? `<span class="spacer"></span><input id="plan-name" placeholder="플랜 이름" style="max-width:160px"><button class="btn ghost" id="plan-save">현재 담보로 플랜 저장</button>` : ''}</div>
@@ -711,6 +714,7 @@ function renderDesignForm(customer, product, restore = null) {
     } catch (e) { showError($('d-err'), e); }
   };
   bindRiderRules(product);
+  if ($('pre-run')) $('pre-run').onclick = () => inlinePreUw(customer, product);
   form.querySelectorAll('.plan').forEach((b) => (b.onclick = () => {
     const pl = product.plans.find((x) => String(x.id) === b.dataset.id);
     applyCoverages(pl.items);
@@ -780,6 +784,52 @@ function bindRiderRules(product) {
     cascade(id, cb.checked);
     $('rule-msg').textContent = notes.length ? `특약 연관 규칙: ${notes.join(', ')}` : '';
   }));
+}
+
+// ------------------------------------------------------------ 설계 중 선심사 · 비교설계 · 대안설계
+async function inlinePreUw(customer, product) {
+  const box = $('presim'), btn = $('pre-run');
+  box.innerHTML = '';
+  const d = await api(`/core/customers/${customer.id}`);
+  if (!d.consents.some((x) => x.valid)) {
+    box.innerHTML = `<div class="notice">선심사·비교설계는 고객의 <b>정보조회 동의</b>(당사 청구이력 + 외부기관 조회, 30일)가 필요합니다.
+      <div class="actions" style="margin-top:6px"><button class="btn sm" id="pre-agree">고객 동의 받음 — 선심사 실행</button></div></div>`;
+    $('pre-agree').onclick = async () => {
+      try { await post(`/core/customers/${customer.id}/consents`, { type: 'PRE_UW_INQUIRY' }); inlinePreUw(customer, product); }
+      catch (e) { box.insertAdjacentHTML('beforeend', `<div class="error">${esc(e.message)}</div>`); }
+    };
+    return;
+  }
+  btn.disabled = true; btn.textContent = '심사 중…';
+  try {
+    const r = await post('/core/uw/pre/compare', { customerId: customer.id, productId: product.summary.id });
+    const required = new Set(product.coverages.filter((c) => c.required).map((c) => c.id));
+    const sel = r.selected.uwCase, alt = r.alternative?.uwCase;
+    // 대안설계: 연기·거절이 예상되는 특약을 빼면 나머지는 그대로 가입할 수 있다
+    const droppable = sel.results.filter((x) => x.signal === 'RED' && !required.has(x.coverageId));
+    const column = (c, current) => `<div class="cmp ${current ? 'current' : ''}">
+      <div class="cmp-head"><b>${esc(c.productName)}</b> ${uwTypeTag(c.simplifiedUw)} ${current ? tag('지금 설계', 't-info') : ''}</div>
+      <div class="signal-box">${signalLight(c.signal, c.signalLabel)}</div>
+      ${table(['', '담보', '예상', '조건'], c.results.map((x) => `<tr><td>${signalDot(x.signal)}</td><td>${esc(x.coverageName)}</td>
+        <td>${outcomeTag(x.outcome, false)}</td><td class="small">${exclusionText(x.exclusions)}${x.ratingPct ? `할증 ${x.ratingPct}%` : ''}</td></tr>`))}
+      <div class="actions" style="margin-top:8px">${current
+        ? (droppable.length ? `<button class="btn sm" id="alt-drop">대안설계: ${droppable.map((x) => esc(x.coverageName)).join(', ')} 빼기</button>` : '')
+        : `<a class="btn sm ${c.signal === 'GREEN' || c.signal !== sel.signal ? '' : 'ghost'}" href="#/design?customer=${customer.id}&product=${c.productId}">이 상품으로 설계</a>`}
+        <a class="small" href="#/uw/${c.id}">심사 건 #${c.id}</a></div></div>`;
+    box.innerHTML = `
+      <p class="recommend">${esc(r.recommendation)}</p>
+      <div class="cmp-grid">${column(sel, true)}${alt ? column(alt, false) : ''}</div>
+      <p class="small muted">예상 결과이며 구속력은 없습니다. 청약 후 고지 내용으로 전산심사에서 확정됩니다. 조회 이력 ${r.selected.inquired.length}건 기준.</p>`;
+    if ($('alt-drop')) $('alt-drop').onclick = () => {
+      droppable.forEach((x) => {
+        const cb = activeView.querySelector(`.cov[value="${x.coverageId}"]`);
+        if (cb?.checked && !cb.disabled) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
+      });
+      $('alt-drop').replaceWith(Object.assign(document.createElement('span'), { className: 'small t-ok', textContent: '연기·거절 예상 특약을 뺐습니다. 보험료를 다시 계산하세요.' }));
+    };
+  } catch (e) {
+    box.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  } finally { btn.disabled = false; btn.textContent = '선심사 · 비교설계'; }
 }
 
 function applyCoverages(items) {

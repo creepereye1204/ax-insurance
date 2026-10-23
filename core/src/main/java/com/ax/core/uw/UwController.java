@@ -1,6 +1,7 @@
 package com.ax.core.uw;
 
 import com.ax.core.application.DisclosureForm.AnswerInput;
+import com.ax.core.common.BusinessException;
 import com.ax.core.uw.UwService.ManualChoice;
 import com.ax.core.uw.engine.Exclusion;
 import com.ax.core.uw.engine.MedicalRecord;
@@ -78,6 +79,13 @@ public class UwController {
                                List<AnswerInput> answers) {
     }
 
+    public record CompareRequest(@NotNull Long customerId, @NotNull Long productId) {
+    }
+
+    /** 비교설계: 고른 상품과 심사 방식이 반대인 상품(표준↔간편)의 선심사 결과를 나란히 */
+    public record CompareResponse(PreUwResponse selected, PreUwResponse alternative, String recommendation) {
+    }
+
     public record DecisionRequest(@NotEmpty Map<Long, ManualChoice> choices, @NotBlank String underwriter, String comment) {
     }
 
@@ -109,6 +117,35 @@ public class UwController {
                 .map(PreUwInquiry::getSnapshot).orElse(List.of());
         CaseResponse response = CaseResponse.from(c);
         return new PreUwResponse(response, inquired, hintFor(response));
+    }
+
+    @PostMapping("/pre/compare")
+    @Transactional
+    public CompareResponse compare(@Valid @RequestBody CompareRequest req) {
+        if (!uwService.hasInquiryConsent(req.customerId())) {
+            throw new BusinessException("비교설계는 고객의 정보조회 동의가 필요합니다 (표준·간편 고지 문항이 서로 달라 조회 이력으로 비교합니다).");
+        }
+        PreUwResponse selected = preUnderwrite(new PreUwRequest(req.customerId(), req.productId(), null, null));
+        PreUwResponse alternative = uwService.counterpartOf(req.productId(), req.customerId())
+                .map(p -> preUnderwrite(new PreUwRequest(req.customerId(), p.getId(), null, null)))
+                .orElse(null);
+        return new CompareResponse(selected, alternative, recommend(selected.uwCase(), alternative == null ? null : alternative.uwCase()));
+    }
+
+    static String recommend(CaseResponse selected, CaseResponse alternative) {
+        if (alternative == null) {
+            return "같은 유형에 비교할 " + (selected.simplifiedUw() ? "표준심사" : "간편심사형") + " 상품이 없습니다 (판매 중 · 가입나이 기준).";
+        }
+        int diff = Integer.compare(selected.signal().ordinal(), alternative.signal().ordinal());
+        CaseResponse standard = selected.simplifiedUw() ? alternative : selected;
+        if (diff > 0) {
+            return "'" + alternative.productName() + "'의 예상 결과가 더 좋습니다"
+                    + (alternative.simplifiedUw() ? " — 간편심사형은 통상 보험료가 더 높으니 함께 안내하세요." : " — 표준심사형은 통상 보험료도 더 낮습니다.");
+        }
+        if (diff < 0) {
+            return "지금 고른 상품의 예상 결과가 더 좋습니다.";
+        }
+        return "두 상품의 예상 결과가 같습니다. 통상 보험료가 더 낮은 표준심사형('" + standard.productName() + "')이 유리합니다.";
     }
 
     private static String hintFor(CaseResponse c) {

@@ -616,6 +616,30 @@ def _():
     return f"제외 {len(excluded)}명(비운전·나이 등), 4명 법인 차단"
 
 
+
+@scenario("S28 박당뇨: 설계 중 비교설계 — 표준 종신 ↔ 간편심사형 종신 예상 결과 나란히 / 동의 없으면 불가")
+def _():
+    c = customer("박당뇨")
+    call("POST", f"/customers/{c['id']}/consents", {"type": "PRE_UW_INQUIRY"})
+    std = product("WHOLE_LIFE", lambda x: not x["simplifiedUw"] and x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"])
+    r = call("POST", "/uw/pre/compare", {"customerId": c["id"], "productId": std["summary"]["id"]})
+    sel, alt = r["selected"]["uwCase"], r["alternative"]["uwCase"]
+    assert sel["productId"] == std["summary"]["id"] and not sel["simplifiedUw"], sel["productName"]
+    assert alt["simplifiedUw"] and alt["productId"] != sel["productId"], alt["productName"]
+    assert r["selected"]["inquired"], "조회 이력이 비어 있음 (외부기관 당뇨 투약)"
+    assert sel["signal"] != "GREEN" and r["recommendation"], (sel["signal"], r["recommendation"])
+    # 반대 방향(간편 → 표준)도 비교 상대를 찾는다
+    back = call("POST", "/uw/pre/compare", {"customerId": c["id"], "productId": alt["productId"]})
+    assert not back["alternative"]["uwCase"]["simplifiedUw"]
+
+    fresh = call("POST", "/customers/virtual", {"minAge": 30, "maxAge": 40})
+    try:
+        call("POST", "/uw/pre/compare", {"customerId": fresh["id"], "productId": std["summary"]["id"]})
+        raise AssertionError("동의 없이 비교설계됨")
+    except ApiError as e:
+        assert "정보조회 동의" in str(e.detail), e.detail
+    return f"표준 {sel['signal']} ↔ 간편 {alt['signal']} · {r['recommendation'][:30]}…"
+
 if __name__ == "__main__":
     width = max(len(r[1]) for r in results)
     for status, name, note, sec in results:

@@ -20,6 +20,7 @@ import com.ax.core.product.Coverage;
 import com.ax.core.product.CoverageCategory;
 import com.ax.core.product.Product;
 import com.ax.core.product.ProductRepository;
+import com.ax.core.product.SaleStatus;
 import com.ax.core.uw.engine.CoverageDecision;
 import com.ax.core.uw.engine.CoverageOutcome;
 import com.ax.core.uw.engine.MedicalRecord;
@@ -29,6 +30,7 @@ import com.ax.core.uw.rule.UwRuleSet;
 import com.ax.core.uw.rule.UwRuleSetRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -207,6 +209,31 @@ public class UwService {
         caseRepository.save(uwCase);
         consent.ifPresent(c -> inquiryRepository.save(new PreUwInquiry(uwCase, c, history)));
         return uwCase;
+    }
+
+    /**
+     * 비교설계 대상: 같은 유형에서 심사 방식(표준↔간편)이 반대인 판매 중 상품.
+     * 고객 보험나이로 가입할 수 있어야 하고, 담보 분류가 많이 겹칠수록 · 최근 출시일수록 우선한다.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Product> counterpartOf(Long productId, Long customerId) {
+        Product base = productRepository.findById(productId).orElseThrow(() -> new NotFoundException("상품", productId));
+        Customer customer = customerRepository.findById(customerId).orElseThrow(() -> new NotFoundException("고객", customerId));
+        int age = customer.insuranceAgeAt(LocalDate.now());
+        List<CoverageCategory> categories = base.getCoverages().stream().map(Coverage::getCategory).distinct().toList();
+        Comparator<Product> overlap = Comparator.comparingLong(
+                p -> p.getCoverages().stream().map(Coverage::getCategory).distinct().filter(categories::contains).count());
+        return productRepository.findByTypeAndSimplifiedUwAndSaleStatus(base.getType(), !base.isSimplifiedUw(), SaleStatus.ON_SALE)
+                .stream()
+                .filter(p -> p.acceptsAge(age))
+                .max(overlap.thenComparing(Product::getLaunchedOn, Comparator.nullsFirst(Comparator.naturalOrder())));
+    }
+
+    /** 비교설계는 조회 이력으로만 판단한다 (고지 문항이 표준·간편 질문지마다 달라 같은 답을 쓸 수 없다) */
+    @Transactional(readOnly = true)
+    public boolean hasInquiryConsent(Long customerId) {
+        return consentRepository.findFirstByCustomerIdAndTypeAndExpiresAtAfterOrderByAgreedAtDesc(
+                customerId, ConsentType.PRE_UW_INQUIRY, LocalDateTime.now()).isPresent();
     }
 
     // ----------------------------------------------------------------
