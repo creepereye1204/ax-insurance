@@ -1,133 +1,62 @@
 <!doctype html><html><head><meta charset="utf-8"><style>
-body{margin:0;background:#fff;font-family:"Noto Sans CJK KR","Noto Sans KR","Apple SD Gothic Neo",sans-serif}
-svg text{font-family:inherit}
+body{margin:0;background:#fff;font-family:"Noto Sans CJK KR","Noto Sans KR",sans-serif}svg text{font-family:inherit}
 </style></head><body>
-<svg id="d" width="1600" height="960" viewBox="0 0 1600 960" xmlns="http://www.w3.org/2000/svg">
+<svg id="d" width="1180" height="385" viewBox="0 0 1180 385" xmlns="http://www.w3.org/2000/svg">
 <defs>
-  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475467"/></marker>
-  <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b42318"/></marker>
-  <style>
-    .box{fill:#fff;stroke:#d0d5dd;stroke-width:1.5}
-    .t{font-size:17px;font-weight:700;fill:#101828}
-    .s{font-size:13px;fill:#475467}
-    .xs{font-size:12px;fill:#667085}
-    .lbl{font-size:12.5px;fill:#344054;font-weight:600}
-    .ln{stroke:#475467;stroke-width:1.8;fill:none}
-    .chip{stroke-width:1.2;rx:7}
-  </style>
+ <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475467"/></marker>
+ <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#b42318"/></marker>
+ <style>
+  .b{fill:#fff;stroke:#d0d5dd;stroke-width:1.6}
+  .t{font-size:17px;font-weight:700;fill:#101828}
+  .s{font-size:13px;fill:#475467}
+  .x{font-size:12px;fill:#667085}
+  .l{stroke:#475467;stroke-width:1.8;fill:none}
+ </style>
 </defs>
-
-<text x="30" y="44" style="font-size:26px;font-weight:800;fill:#101828">Ax · 보험 AI 언더라이팅 · 업무 시스템</text>
-<text x="30" y="70" class="s">설계사 채널(고객·가입설계·선심사·청약) → 전산심사(룰 엔진) → 본사심사(AI 의견) → 계약 → 청구 · 가상 데이터(고객 3만 · 청구 50만)</text>
-
 <!-- 사용자 -->
-<rect class="box" x="30" y="250" width="170" height="130" rx="12"/>
-<text x="115" y="285" text-anchor="middle" class="t">사용자</text>
-<text x="115" y="310" text-anchor="middle" class="s">설계사 · 언더라이터</text>
-<text x="115" y="330" text-anchor="middle" class="s">· 보상 담당자</text>
-<text x="115" y="358" text-anchor="middle" class="xs">브라우저 (SPA)</text>
-
+<rect class="b" x="20" y="150" width="130" height="90" rx="12"/>
+<text x="85" y="186" text-anchor="middle" class="t">사용자</text><text x="85" y="210" text-anchor="middle" class="x">설계사 · 심사자</text>
 <!-- HAProxy -->
-<rect class="box" x="250" y="250" width="170" height="130" rx="12"/>
-<text x="335" y="285" text-anchor="middle" class="t">HAProxy</text>
-<text x="335" y="310" text-anchor="middle" class="s">TLS 종료</text>
-<text x="335" y="330" text-anchor="middle" class="s">도메인 라우팅</text>
-<text x="335" y="358" text-anchor="middle" class="xs">공유 리버스 프록시</text>
-
+<rect class="b" x="200" y="150" width="130" height="90" rx="12"/>
+<text x="265" y="186" text-anchor="middle" class="t">HAProxy</text><text x="265" y="210" text-anchor="middle" class="x">TLS 종료</text>
 <!-- Gateway -->
-<rect class="box" x="470" y="215" width="200" height="200" rx="12" style="stroke:#1f5fbf;stroke-width:2"/>
-<text x="570" y="248" text-anchor="middle" class="t">Gateway</text>
-<text x="570" y="268" text-anchor="middle" class="xs">nginx</text>
-<text x="488" y="300" class="s">· 업무 화면 (정적 SPA)</text>
-<text x="488" y="322" class="s">· /core 로드밸런싱</text>
-<text x="500" y="344" class="s">장애 노드 자동 재시도</text>
-<text x="488" y="366" class="s">· /ai 라우팅</text>
-<text x="488" y="388" class="s">· actuator 외부 차단</text>
-
-<!-- Core cluster -->
-<rect x="720" y="100" width="500" height="410" rx="14" style="fill:#f5f8ff;stroke:#1f5fbf;stroke-width:2"/>
-<text x="740" y="132" class="t" style="fill:#1f5fbf">미니 기간계 (Core) × 2</text>
-<text x="740" y="152" class="xs">Spring Boot 3.5 · Java 21 · JPA · 롤링 배포 · graceful shutdown</text>
-<rect class="box" x="740" y="166" width="225" height="44" rx="9"/><text x="852" y="194" text-anchor="middle" class="lbl">core-a  (기준 데이터 적재)</text>
-<rect class="box" x="975" y="166" width="225" height="44" rx="9"/><text x="1087" y="194" text-anchor="middle" class="lbl">core-b</text>
-<g class="lbl">
-  <rect class="chip" x="740" y="226" width="225" height="54" style="fill:#fff;stroke:#c7d7f5"/><text x="752" y="248">고객 · 법인</text><text x="752" y="268" class="xs">가족 · 투자성향 · 주민번호 AES-GCM</text>
-  <rect class="chip" x="975" y="226" width="225" height="54" style="fill:#fff;stroke:#c7d7f5"/><text x="987" y="248">상품 · 가입설계</text><text x="987" y="268" class="xs">보험나이 · 특약 규칙 · 플랜 · 단체</text>
-  <rect class="chip" x="740" y="290" width="460" height="74" style="fill:#fff7e6;stroke:#f0c36d"/><text x="752" y="313">심사 룰 엔진 (Rule as Data · 버전 관리)</text>
-  <text x="752" y="334" class="xs">선심사(신호등) · 비교설계 표준↔간편 · 동적 고지(표준 / 간편 3-2-5)</text>
-  <text x="752" y="352" class="xs">전산심사: 담보별 표준체 · 부담보 · 할증 · 연기 · 거절 → 가장 보수적 결과</text>
-  <rect class="chip" x="740" y="374" width="225" height="54" style="fill:#fff;stroke:#c7d7f5"/><text x="752" y="396">청약 · 계약</text><text x="752" y="416" class="xs">전자서명 · 청약철회 · 해지</text>
-  <rect class="chip" x="975" y="374" width="225" height="54" style="fill:#fff;stroke:#c7d7f5"/><text x="987" y="396">청구 · 본사심사</text><text x="987" y="416" class="xs">고지의무 위반 · 부담보 점검</text>
-  <rect class="chip" x="740" y="438" width="460" height="54" style="fill:#fff;stroke:#c7d7f5"/><text x="752" y="460">대외계 (Mock)</text><text x="752" y="480" class="xs">외부기관 의료이력 조회 · 정보조회 동의 기반</text>
-</g>
-
+<rect class="b" x="380" y="140" width="150" height="110" rx="12" style="stroke:#1f5fbf;stroke-width:2"/>
+<text x="455" y="176" text-anchor="middle" class="t">Gateway</text><text x="455" y="198" text-anchor="middle" class="x">nginx</text>
+<text x="455" y="220" text-anchor="middle" class="x">업무 화면 · 로드밸런싱</text>
+<!-- Core -->
+<rect x="590" y="20" width="270" height="180" rx="14" style="fill:#f5f8ff;stroke:#1f5fbf;stroke-width:2"/>
+<text x="610" y="50" class="t" style="fill:#1f5fbf">미니 기간계</text><text x="712" y="50" class="x">Spring Boot · Java 21</text>
+<rect class="b" x="610" y="66" width="110" height="40" rx="8"/><text x="665" y="91" text-anchor="middle" class="s" style="font-weight:600">core-a</text>
+<rect class="b" x="730" y="66" width="110" height="40" rx="8"/><text x="785" y="91" text-anchor="middle" class="s" style="font-weight:600">core-b</text>
+<text x="610" y="134" class="s">고객 · 가입설계 · 청약 · 계약 · 청구</text>
+<text x="610" y="156" class="s" style="fill:#a15c00;font-weight:600">심사 룰 엔진 (Rule as Data)</text>
+<text x="610" y="178" class="x">대외계 Mock · 주민번호 AES-GCM</text>
 <!-- AI -->
-<rect x="1270" y="100" width="300" height="410" rx="14" style="fill:#f7f4ff;stroke:#5a3fc0;stroke-width:2"/>
-<text x="1290" y="132" class="t" style="fill:#5a3fc0">AI 서비스</text>
-<text x="1290" y="152" class="xs">Python · FastAPI</text>
-<rect class="chip" x="1290" y="166" width="260" height="74" style="fill:#fff;stroke:#d6ccf5"/><text x="1302" y="189" class="lbl">약관 RAG 에이전트</text>
-<text x="1302" y="209" class="xs">tool use: 약관 검색 · 조항 인용</text><text x="1302" y="227" class="xs">약관 Q&amp;A · 심사·청구 참고의견</text>
-<rect class="chip" x="1290" y="250" width="260" height="54" style="fill:#fff;stroke:#d6ccf5"/><text x="1302" y="272" class="lbl">임베딩</text><text x="1302" y="292" class="xs">multilingual-e5-small (384d)</text>
-<text x="1290" y="330" class="lbl">LLM (설정으로 전환)</text>
-<rect class="chip" x="1290" y="340" width="125" height="70" style="fill:#fff;stroke:#d6ccf5"/><text x="1352" y="368" text-anchor="middle" class="lbl">Ollama</text><text x="1352" y="388" text-anchor="middle" class="xs">gemma 12B</text><text x="1352" y="403" text-anchor="middle" class="xs">로컬 GPU</text>
-<rect class="chip" x="1425" y="340" width="125" height="70" style="fill:#fff;stroke:#d6ccf5"/><text x="1487" y="368" text-anchor="middle" class="lbl">Claude API</text><text x="1487" y="388" text-anchor="middle" class="xs">고품질 모드</text>
-<text x="1290" y="440" class="xs">AI 장애가 업무를 멈추지 않도록</text>
-<text x="1290" y="458" class="xs">기간계는 AI 에 의존하지 않음</text>
-<text x="1290" y="476" class="xs">(서킷 OPEN → 수동심사로 계속)</text>
-
+<rect x="590" y="240" width="270" height="125" rx="14" style="fill:#f7f4ff;stroke:#5a3fc0;stroke-width:2"/>
+<text x="610" y="270" class="t" style="fill:#5a3fc0">AI 서비스</text><text x="700" y="270" class="x">Python · FastAPI</text>
+<text x="610" y="300" class="s">약관 RAG 에이전트</text>
+<text x="610" y="322" class="x">약관 Q&amp;A · 심사·청구 참고의견</text>
+<text x="610" y="344" class="x">임베딩 multilingual-e5</text>
+<!-- LLM -->
+<rect class="b" x="930" y="255" width="230" height="110" rx="12"/>
+<text x="1045" y="287" text-anchor="middle" class="t">LLM</text>
+<text x="1045" y="313" text-anchor="middle" class="s">Ollama gemma (로컬 GPU)</text>
+<text x="1045" y="335" text-anchor="middle" class="s">Claude API</text>
+<text x="1045" y="355" text-anchor="middle" class="x">설정으로 전환</text>
 <!-- DB -->
-<rect x="720" y="580" width="850" height="110" rx="14" style="fill:#f0faf5;stroke:#1a7f4b;stroke-width:2"/>
-<text x="740" y="612" class="t" style="fill:#1a7f4b">PostgreSQL 16 + pgvector</text>
-<rect class="chip" x="740" y="626" width="480" height="48" style="fill:#fff;stroke:#b7e3cb"/><text x="752" y="647" class="lbl">core 스키마 — 원장</text><text x="752" y="665" class="xs">고객 · 상품 · 요율 · 청약 · 계약 · 청구 · 심사 이력(룰셋 버전 · 스냅샷)</text>
-<rect class="chip" x="1240" y="626" width="310" height="48" style="fill:#fff;stroke:#b7e3cb"/><text x="1252" y="647" class="lbl">약관 청크 · 벡터</text><text x="1252" y="665" class="xs">유사도 검색 (pgvector)</text>
-
+<rect x="930" y="20" width="230" height="180" rx="14" style="fill:#f0faf5;stroke:#1a7f4b;stroke-width:2"/>
+<text x="1045" y="56" text-anchor="middle" class="t" style="fill:#1a7f4b">PostgreSQL 16</text>
+<text x="1045" y="78" text-anchor="middle" class="x">+ pgvector</text>
+<text x="1045" y="120" text-anchor="middle" class="s">원장 (core 스키마)</text>
+<text x="1045" y="146" text-anchor="middle" class="s">약관 벡터</text>
 <!-- 화살표 -->
-<path class="ln" d="M200 315 H246" marker-end="url(#a)"/><text x="223" y="305" text-anchor="middle" class="xs">HTTPS</text>
-<path class="ln" d="M420 315 H466" marker-end="url(#a)"/>
-<path class="ln" d="M670 290 H716" marker-end="url(#a)"/><text x="693" y="280" text-anchor="middle" class="xs">/core</text>
-<path class="ln" d="M570 215 V88 H1420 V96" marker-end="url(#a)"/><text x="1100" y="82" text-anchor="middle" class="xs">/ai — 약관 Q&amp;A</text>
-<path d="M1220 330 H1266" style="stroke:#b42318;stroke-width:1.8;fill:none;stroke-dasharray:6 4" marker-end="url(#r)"/>
-<text x="1244" y="318" text-anchor="middle" style="font-size:11px;fill:#b42318">비동기</text>
-<text x="1244" y="350" text-anchor="middle" style="font-size:11px;fill:#b42318">서킷</text>
-<path class="ln" d="M970 510 V576" marker-end="url(#a)"/><text x="980" y="548" class="xs">JPA · 트랜잭션</text>
-<path class="ln" d="M1420 510 V576" marker-end="url(#a)"/><text x="1430" y="548" class="xs">벡터 검색</text>
-
-<!-- 보안 메모 -->
-<rect x="30" y="450" width="640" height="240" rx="14" style="fill:#fafafa;stroke:#e4e7ec"/>
-<text x="50" y="482" class="t">설계 포인트</text>
-<g class="s">
-<text x="50" y="512">· 심사 기준을 코드가 아닌 데이터(룰)로 관리 — 버전별 활성화, 심사 건에 룰셋 버전 기록</text>
-<text x="50" y="538">· 담보별 결과를 가장 보수적으로 합성, 신호등으로 설계 단계에서 미리 안내</text>
-<text x="50" y="564">· 기간계 2대 + 게이트웨이 재시도 → 무중단 롤링 배포</text>
-<text x="50" y="590">· AI 는 참고의견만 — 서킷브레이커로 장애 격리, 결정은 사람이</text>
-<text x="50" y="616">· 주민번호 AES-256-GCM + 블라인드 인덱스, 열람 사유·감사 로그</text>
-<text x="62" y="642">암호화 키는 기간계에만 파일 secret 으로 주입 (AI 서비스에는 없음)</text>
-<text x="50" y="668">· 금소법 적합성 · 고지의무 · 청약철회 등 업무 규칙을 시나리오로 검증</text>
-</g>
-
-<!-- CI/CD -->
-<rect x="30" y="730" width="1540" height="200" rx="14" style="fill:#fff;stroke:#d0d5dd;stroke-width:1.5;stroke-dasharray:7 5"/>
-<text x="50" y="764" class="t">CI / CD</text>
-<g>
-<rect class="chip" x="50" y="784" width="250" height="120" style="fill:#f9fafb;stroke:#d0d5dd"/>
-<text x="66" y="812" class="lbl">git push (main)</text><text x="66" y="836" class="xs">GitHub</text>
-<rect class="chip" x="360" y="784" width="420" height="120" style="fill:#f9fafb;stroke:#d0d5dd"/>
-<text x="376" y="812" class="lbl">CI — GitHub Actions</text>
-<text x="376" y="836" class="xs">① 단위 테스트 (룰 엔진 · 특약 규칙 · 암호화 · 단체 할인)</text>
-<text x="376" y="858" class="xs">② DB + 기간계 컨테이너 기동 → 업무 시나리오 28개 API 검증</text>
-<text x="376" y="880" class="xs">실패 커밋은 배포되지 않음</text>
-<rect class="chip" x="840" y="784" width="420" height="120" style="fill:#f9fafb;stroke:#d0d5dd"/>
-<text x="856" y="812" class="lbl">CD — self-hosted runner (홈서버)</text>
-<text x="856" y="836" class="xs">변경된 서비스만 배포 · core-a → core-b 순차 롤링</text>
-<text x="856" y="858" class="xs">readiness 확인 후 교체 · 배포 SHA 기록</text>
-<text x="856" y="880" class="xs">배포 후 운영 상태 확인</text>
-<rect class="chip" x="1320" y="784" width="230" height="120" style="fill:#f9fafb;stroke:#d0d5dd"/>
-<text x="1336" y="812" class="lbl">Docker Compose</text>
-<text x="1336" y="836" class="xs">db · core-a · core-b</text>
-<text x="1336" y="858" class="xs">api · gateway</text>
-<text x="1336" y="880" class="xs">단일 호스트</text>
-<path class="ln" d="M300 844 H356" marker-end="url(#a)"/>
-<path class="ln" d="M780 844 H836" marker-end="url(#a)"/><text x="808" y="834" text-anchor="middle" class="xs">성공</text>
-<path class="ln" d="M1260 844 H1316" marker-end="url(#a)"/>
-</g>
+<path class="l" d="M150 195 H196" marker-end="url(#a)"/><text x="173" y="186" text-anchor="middle" class="x">HTTPS</text>
+<path class="l" d="M330 195 H376" marker-end="url(#a)"/>
+<path class="l" d="M530 170 C560 170 560 110 586 110" marker-end="url(#a)"/><text x="545" y="102" class="x">/core</text>
+<path class="l" d="M530 220 C560 220 560 300 586 300" marker-end="url(#a)"/><text x="540" y="278" class="x">/ai</text>
+<path d="M725 200 V236" style="stroke:#b42318;stroke-width:1.8;fill:none;stroke-dasharray:6 4" marker-end="url(#r)"/>
+<text x="715" y="216" text-anchor="end" style="font-size:12px;fill:#b42318">비동기 · 서킷브레이커</text><text x="735" y="216" style="font-size:12px;fill:#b42318">장애 시 수동심사</text>
+<path class="l" d="M860 110 H926" marker-end="url(#a)"/><text x="893" y="100" text-anchor="middle" class="x">JPA</text>
+<path class="l" d="M860 265 C895 265 895 175 926 175" marker-end="url(#a)"/><text x="904" y="232" class="x">벡터 검색</text>
+<path class="l" d="M860 310 H926" marker-end="url(#a)"/>
 </svg></body></html>
