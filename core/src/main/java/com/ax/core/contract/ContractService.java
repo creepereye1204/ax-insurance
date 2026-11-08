@@ -3,6 +3,7 @@ package com.ax.core.contract;
 import com.ax.core.application.Application;
 import com.ax.core.common.NotFoundException;
 import com.ax.core.customer.CustomerStatus;
+import com.ax.core.payment.PaymentService;
 import com.ax.core.uw.UwCoverageResult;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -19,6 +20,7 @@ public class ContractService {
     static final int TERM_YEARS = 10;
 
     private final ContractRepository contractRepository;
+    private final PaymentService paymentService;
 
     /** 심사에서 인수된 담보만으로 계약을 성립시킨다. 부담보 기간은 계약일부터 계산한다. */
     @Transactional
@@ -34,7 +36,9 @@ public class ContractService {
                     r.getRatingPct(), exclusions));
         }
         application.getCustomer().changeStatus(CustomerStatus.CONTRACTED);
-        return contractRepository.save(contract);
+        contractRepository.save(contract);
+        paymentService.recordInitial(contract);
+        return contract;
     }
 
     @Transactional(readOnly = true)

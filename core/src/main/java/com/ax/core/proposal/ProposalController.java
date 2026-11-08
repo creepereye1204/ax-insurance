@@ -27,7 +27,7 @@ public class ProposalController {
 
     public record DesignRequest(@NotNull Long customerId, @NotNull Long productId, @NotNull Integer paymentTerm,
                                 List<CoverageAmount> coverages, Long monthlyContribution, Integer annuityStartAge,
-                                List<FundAllocation> funds, boolean unsuitableAcknowledged) {
+                                List<FundAllocation> funds, boolean unsuitableAcknowledged, Long agentId) {
         PremiumCalculator.Input input() {
             return new PremiumCalculator.Input(paymentTerm, coverages, monthlyContribution, annuityStartAge, funds,
                     unsuitableAcknowledged);
@@ -60,7 +60,7 @@ public class ProposalController {
                            long monthlyPremium, LocalDate nextAgeUpDate, Long premiumAfterAgeUp, Long firstPremium,
                            Integer conversionRatePct, Long convertedPremium, Illustration illustration,
                            String suitabilityLabel, List<String> suitabilityIssues, String investmentProfileLabel,
-                           LocalDateTime profiledAt, LocalDateTime issuedAt,
+                           LocalDateTime profiledAt, LocalDateTime issuedAt, String agentName, String agentBranch,
                            LocalDate validUntil, String validUntilReason, boolean expired, List<CoverageLine> coverages) {
         public static Response from(Proposal p) {
             return new Response(p.getId(), p.getProposalNo(), p.getStatus().name(), p.getStatus().getLabel(),
@@ -71,7 +71,8 @@ public class ProposalController {
                     p.getNextAgeUpDate(), p.getPremiumAfterAgeUp(), p.getFirstPremium(), p.getConversionRatePct(),
                     p.getConvertedPremium(), p.getIllustration(), p.getSuitability().getLabel(), p.getSuitabilityIssues(),
                     p.getInvestmentProfile() == null ? null : p.getInvestmentProfile().getLabel(), p.getProfiledAt(),
-                    p.getIssuedAt(), p.getValidUntil(), p.getValidUntilReason(), p.isExpired(LocalDate.now()),
+                    p.getIssuedAt(), p.getAgent() == null ? null : p.getAgent().getName(),
+                    p.getAgent() == null ? null : p.getAgent().getBranch(), p.getValidUntil(), p.getValidUntilReason(), p.isExpired(LocalDate.now()),
                     p.getCoverages().stream().map(c -> new CoverageLine(c.getCoverage().getId(), c.getCoverage().getName(),
                             c.getCoverage().getCategory().getLabel(), c.getCoverage().isRequired(), c.getInsuredAmount(),
                             c.getMonthlyPremium())).toList());
@@ -95,7 +96,7 @@ public class ProposalController {
     @Transactional
     @ResponseStatus(HttpStatus.CREATED)
     public Response issue(@Valid @RequestBody DesignRequest req) {
-        return Response.from(proposalService.issue(req.customerId(), req.productId(), req.input()));
+        return Response.from(proposalService.issue(req.customerId(), req.productId(), req.input(), req.agentId()));
     }
 
     @GetMapping

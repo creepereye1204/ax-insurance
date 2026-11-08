@@ -1,5 +1,6 @@
 package com.ax.core.proposal;
 
+import com.ax.core.agent.Agent;
 import com.ax.core.common.BaseTimeEntity;
 import com.ax.core.common.BusinessException;
 import com.ax.core.customer.Customer;
@@ -49,6 +50,11 @@ public class Proposal extends BaseTimeEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "customer_id")
     private Customer customer;
+
+    /** 담당 설계사 (null 은 미지정 — 컬럼 추가 전 데이터) */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "agent_id")
+    private Agent agent;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id")
@@ -163,5 +169,9 @@ public class Proposal extends BaseTimeEntity {
             throw new BusinessException("유효기간(" + validUntil + ")이 지난 설계서입니다. 다시 설계하세요.");
         }
         this.status = ProposalStatus.CONVERTED;
+    }
+
+    void assignAgent(Agent agent) {
+        this.agent = agent;
     }
 }

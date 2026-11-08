@@ -1,6 +1,7 @@
 package com.ax.core.customer;
 
 import com.ax.core.common.BaseTimeEntity;
+import com.ax.core.common.Region;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -71,6 +72,11 @@ public class Customer extends BaseTimeEntity {
     @Column(length = 20)
     private DrivingType driving;
 
+    /** 거주 시·도 (null 은 미확인) */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private Region region;
+
     /** 화면에서 즉시 생성한 가상고객 */
     private Boolean virtualCustomer;
 
@@ -97,13 +103,20 @@ public class Customer extends BaseTimeEntity {
     }
 
     public void update(String name, String phone, String occupation, int jobRiskGrade, ConsumerType consumerType,
-                       DrivingType driving) {
+                       DrivingType driving, Region region) {
         this.name = name;
         this.phone = phone;
         this.occupation = occupation;
         this.jobRiskGrade = jobRiskGrade;
         this.consumerType = consumerType;
         this.driving = driving;
+        if (region != null) {   // 지역은 미전송(null)이면 그대로 둔다 — 지역 추가 전 클라이언트와 호환
+            this.region = region;
+        }
+    }
+
+    public void changeRegion(Region region) {
+        this.region = region;
     }
 
     public void changeDriving(DrivingType driving) {

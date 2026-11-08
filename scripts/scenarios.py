@@ -59,14 +59,14 @@ def diagnose(cust, scores):
     return call("POST", f"/customers/{cust['id']}/investment-profile", {"scores": scores})
 
 
-def design(cust, prod, term, amounts=None, contribution=None, annuity_age=None, funds=None, ack=False):
+def design(cust, prod, term, amounts=None, contribution=None, annuity_age=None, funds=None, ack=False, agent=None):
     if amounts is None:
         amounts = [{"coverageId": c["id"], "amount": c["defaultAmount"]}
                    for c in prod["coverages"] if not c["accumulation"]]
     return call("POST", "/proposals", {
         "customerId": cust["id"], "productId": prod["summary"]["id"], "paymentTerm": term, "coverages": amounts,
         "monthlyContribution": contribution, "annuityStartAge": annuity_age, "funds": funds,
-        "unsuitableAcknowledged": ack})
+        "unsuitableAcknowledged": ack, "agentId": agent})
 
 
 def questionnaire(product_id):
@@ -639,6 +639,66 @@ def _():
     except ApiError as e:
         assert "정보조회 동의" in str(e.detail), e.detail
     return f"표준 {sel['signal']} ↔ 간편 {alt['signal']} · {r['recommendation'][:30]}…"
+
+
+@scenario("S29 수납: 담당 설계사가 설계서→청약→계약으로 / 초회보험료 납입 · 미도래 회차 납입 불가 / 수납 배치 멱등")
+def _():
+    regions = call("GET", "/agents/regions")
+    agents = call("GET", "/agents")
+    assert len(regions) == 17 and len(agents) >= 50, (len(regions), len(agents))
+    c = customer("김정상")
+    assert c["region"], "고객 지역 미배정"
+    agent = next(a for a in agents if a["region"] == c["region"])
+    prod = product("HEALTH", lambda x: not x["simplifiedUw"] and x["minEntryAge"] <= c["insuranceAge"] <= x["maxEntryAge"])
+    p = design(c, prod, 20, agent=agent["id"])
+    assert p["agentName"] == agent["name"], p["agentName"]
+    _, d = apply(p, c)
+    d = issued(d)
+    k = call("GET", f"/contracts/{d['contractId']}")
+    assert k["agentName"] == agent["name"] and k["agentBranch"] == agent["branch"], k["agentName"]
+    ledger = call("GET", f"/contracts/{k['id']}/payments")
+    assert ledger["paidCount"] == 1 and ledger["unpaidCount"] == 0, ledger
+    first = ledger["lines"][0]
+    assert first["installmentNo"] == 1 and first["status"] == "PAID" and first["methodLabel"] == "카드", first
+    try:
+        call("POST", f"/contracts/{k['id']}/payments", {"method": "DIRECT"})
+        raise AssertionError("납입기일이 오지 않은 회차가 납입됨")
+    except ApiError as e:
+        assert "납입할 보험료가 없습니다" in str(e.detail), e.detail
+    assert call("PUT", f"/contracts/{k['id']}/payment-method", {"method": "DIRECT"})["paymentMethodLabel"].startswith("직접납입")
+    try:
+        call("PUT", f"/contracts/{k['id']}/payment-method", {"method": "CARD"})
+        raise AssertionError("계속보험료 카드 납입이 허용됨")
+    except ApiError as e:
+        assert "자동이체 또는 직접납입" in str(e.detail), e.detail
+    call("POST", "/ops/billing/run")
+    again = call("POST", "/ops/billing/run")
+    assert again["summary"].startswith("청구 0건") or "건너뜀" in again["summary"], again
+    return f"{agent['branch']} {agent['name']} → 계약 {k['contractNo']}, 1회차 카드 납입 · 재실행: {again['summary']}"
+
+
+@scenario("S30 실효·부활: 미납으로 실효된 이관 계약 → 납입 불가 → 부활(밀린 보험료 일괄 납입) → 유지 · 계약고객")
+def _():
+    lapsed = call("GET", "/contracts?status=LAPSED")
+    assert lapsed, "실효 계약이 없음 (수납 이력 보강 확인)"
+    k = lapsed[0]
+    ledger = call("GET", f"/contracts/{k['id']}/payments")
+    assert ledger["unpaidCount"] >= 1 and k["statusChangedOn"], ledger["unpaidCount"]
+    try:
+        call("POST", f"/contracts/{k['id']}/payments", {"method": "DIRECT"})
+        raise AssertionError("실효 계약에 일반 납입이 허용됨")
+    except ApiError as e:
+        assert "부활" in str(e.detail), e.detail
+    after = call("POST", f"/contracts/{k['id']}/reinstate", {"method": "DIRECT"})
+    assert after["contract"]["status"] == "ACTIVE" and after["unpaidCount"] == 0, after["contract"]["status"]
+    assert after["paidCount"] >= ledger["paidCount"] + ledger["unpaidCount"], (after["paidCount"], ledger["paidCount"])
+    assert call("GET", f"/customers/{k['customerId']}")["customer"]["status"] == "CONTRACTED"
+    try:
+        call("POST", f"/contracts/{k['id']}/reinstate", {})
+        raise AssertionError("유지 계약이 다시 부활됨")
+    except ApiError as e:
+        assert "실효된 계약만" in str(e.detail), e.detail
+    return f"{k['contractNo']}: 미납 {ledger['unpaidCount']}회차 → 부활 후 {after['paidCount']}/{after['totalInstallments']}회차 납입"
 
 if __name__ == "__main__":
     width = max(len(r[1]) for r in results)

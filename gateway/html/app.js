@@ -40,7 +40,12 @@ const OUTCOME = {
   POSTPONE: ['연기', 't-warn', 'y'], DECLINE: ['거절', 't-bad', 'r'],
 };
 const APP_STATUS = { UNDER_REVIEW: 't-info', ISSUED: 't-ok', POSTPONED: 't-warn', DECLINED: 't-bad' };
-const CONTRACT_STATUS = { ACTIVE: ['유지', 't-ok'], TERMINATED: ['해지', 't-muted'], WITHDRAWN: ['청약철회', 't-warn'] };
+const CONTRACT_STATUS = { ACTIVE: ['유지', 't-ok'], LAPSED: ['실효', 't-bad'], TERMINATED: ['해지', 't-muted'], WITHDRAWN: ['청약철회', 't-warn'] };
+const regions = () => cached('regions', '/core/agents/regions');
+const agents = () => cached('agents', '/core/agents');
+// 담당 설계사: 브라우저에 기억 (로그인 대신). 저장소 접근이 막혀도 동작해야 한다
+const savedAgent = { get() { try { return localStorage.getItem('ax.agentId'); } catch { return null; } },
+  set(v) { try { localStorage.setItem('ax.agentId', v); } catch { /* 무시 */ } } };
 const CLAIM_STATUS = {
   RECEIVED: ['접수', 't-muted'], AI_REVIEWING: ['AI 검토 중', 't-info'], AI_REVIEWED: ['AI 검토 완료', 't-info'],
   MANUAL_REVIEW: ['수동심사', 't-warn'], APPROVED: ['지급', 't-ok'], REJECTED: ['부지급', 't-bad'],
@@ -274,6 +279,7 @@ const routes = [
   [/^\/products$/, products],
   [/^\/design$/, design],
   [/^\/proposals\/(\d+)$/, proposalDetail],
+  [/^\/contracts\/(\d+)$/, contractDetail],
   [/^\/pre-uw$/, preUw],
   [/^\/apply$/, apply],
   [/^\/applications$/, applications],
@@ -350,11 +356,30 @@ async function home() {
                          └─ 연기 / 거절
 [보상]    청구 ─ 부담보·고지의무 위반 점검 ─ AI 약관 검토 ─ 심사자 지급 결정</div></div>
   <div class="card"><h2>데이터 규모 (가상)</h2>
-    <p>상품 201개(12종) · 요율 약 11.5만 행 · 고객 약 3만 명 · 기존 계약 6만 건 · 청구 50만 건 · 외부기관 이력 5만 건</p></div>
+    <p>상품 201개(12종) · 요율 약 11.5만 행 · 고객 약 3만 명 · 설계사 약 200명 · 기존 계약 6만 건 · 수납 원장 약 150만 건 · 청구 50만 건 · 외부기관 이력 5만 건</p></div>
+  <div class="card" id="billing"></div>
   <div class="card"><h2>체험 시나리오</h2>
   ${table(['고객', '특징', '해볼 것'], scenarios.map((r) => `<tr><td><b>${r[0]}</b></td><td class="small">${r[1]}</td><td class="small">${r[2]}</td></tr>`))}
   <p class="small muted" style="margin-top:10px">상세: <a href="https://github.com/creepereye1204/ax-insurance/blob/main/docs/scenarios.md">docs/scenarios.md</a>
    · 심사 기준·약관·고객은 모두 가상입니다.</p></div>`;
+  renderBilling();
+}
+
+/** 일 수납 배치: 실행 이력 + 수동 실행 (기간계 2대 중 한 대만 실행, 같은 기준일 반복 실행에도 결과 동일) */
+async function renderBilling() {
+  const box = $('billing');
+  const runs = await api('/core/ops/billing');
+  if (!box) return;
+  box.innerHTML = `<div class="actions"><h2 style="margin:0">일 수납 배치</h2><span class="spacer"></span>
+      <button class="btn ghost sm" id="bill-run">오늘 기준 실행</button></div>
+    <p class="small muted">매일 01:10 — 납입기일이 온 회차 청구 → 자동이체 → 납입유예기간(다음 달 말일) 경과 시 실효. 집합 SQL 3개로 계약 6만 건 처리</p>
+    ${table(['기준일', '실행', '시작', '소요', '결과'], runs.slice(0, 5).map((r) => `<tr><td>${r.asOf}</td><td class="small">${esc(r.triggeredBy)}</td>
+      <td class="small">${dt(r.startedAt)}</td><td class="num">${(r.elapsedMs / 1000).toFixed(1)}초</td><td class="small">${esc(r.summary)}</td></tr>`), '실행 이력이 없습니다.')}
+    <div class="error" id="bill-err" hidden></div>`;
+  $('bill-run').onclick = async () => {
+    $('bill-run').disabled = true;
+    try { await post('/core/ops/billing/run', {}); renderBilling(); } catch (e) { showError($('bill-err'), e); $('bill-run').disabled = false; }
+  };
 }
 
 // ============================================================ 고객관리
@@ -367,7 +392,8 @@ async function customers(params) {
   const page = Number(params.get('page') || 0);
   const status = params.get('status') || '';
   const qs = (p) => `#/customers?q=${encodeURIComponent(q)}&status=${status}&page=${p}`;
-  const data = await api(`/core/customers?q=${encodeURIComponent(q)}&page=${page}${status ? '&status=' + status : ''}`);
+  const [data, regionList] = await Promise.all([
+    api(`/core/customers?q=${encodeURIComponent(q)}&page=${page}${status ? '&status=' + status : ''}`), regions()]);
   view.innerHTML = `
   <div class="actions"><h1>고객관리</h1><span class="spacer"></span>
     <button class="btn ghost" id="virt-btn">가상고객 생성</button><button class="btn" id="new-btn">고객 등록</button></div>
@@ -396,6 +422,7 @@ async function customers(params) {
       <div><label>직업 (위험등급)</label><select id="n-job">${JOBS.map(([j, r]) => `<option value="${esc(j)}" data-risk="${r}">${esc(j)} (${r}등급)</option>`).join('')}</select></div>
       <div><label>금융소비자 구분</label><select id="n-type"><option value="GENERAL">일반금융소비자</option><option value="PROFESSIONAL">전문금융소비자</option></select></div>
       <div><label>운전</label><select id="n-drive"><option value="">미확인</option>${Object.entries(DRIVING).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+      <div><label>거주 지역</label><select id="n-region"><option value="">미확인</option>${regionList.map((r) => `<option value="${r.code}">${esc(r.label)}</option>`).join('')}</select></div>
     </div>
     <div class="actions"><button class="btn" id="n-save">저장</button><button class="btn ghost" id="n-cancel">취소</button></div>
     <div class="error" id="n-err" hidden></div>
@@ -409,10 +436,10 @@ async function customers(params) {
       <button class="btn ghost">검색</button>
       <span class="spacer"></span><span class="muted small">총 ${data.totalElements.toLocaleString()}명</span>
     </form>
-    ${table(['ID', '유형', '이름', '생년월일', '보험나이(만)', '성별', '직업', '운전', '소비자 구분', '투자성향', '연락처'], data.content.map((c) => `
+    ${table(['ID', '유형', '이름', '생년월일', '보험나이(만)', '성별', '지역', '직업', '운전', '소비자 구분', '투자성향', '연락처'], data.content.map((c) => `
       <tr class="click" data-href="#/customers/${c.id}"><td>${c.id}</td><td>${statusTag(c)}</td><td><b>${esc(c.name)}</b> ${c.virtual ? tag('가상', 't-muted') : ''}</td>
       <td>${c.birthDate}</td><td>${c.insuranceAge}세 (${c.age})</td>
-      <td>${c.gender === 'M' ? '남' : '여'}</td><td class="small">${esc(c.occupation)} (${c.jobRiskGrade})</td><td class="small">${esc(c.drivingLabel)}</td><td>${consumerTag(c)}</td>
+      <td>${c.gender === 'M' ? '남' : '여'}</td><td class="small">${esc(c.regionLabel)}</td><td class="small">${esc(c.occupation)} (${c.jobRiskGrade})</td><td class="small">${esc(c.drivingLabel)}</td><td>${consumerTag(c)}</td>
       <td class="small">${esc(c.investmentProfileLabel || '-')}</td><td>${esc(maskPhone(c.phone))}</td></tr>`))}
     <div class="actions" style="margin-top:10px">
       ${page > 0 ? `<a class="btn ghost sm" href="${qs(page - 1)}">이전</a>` : ''}
@@ -445,6 +472,7 @@ async function customers(params) {
         name: $('n-name').value, birthDate: $('n-birth').value || null, gender: $('n-gender').value,
         phone: $('n-phone').value.trim() || null, consumerType: $('n-type').value,
         occupation: job.value, jobRiskGrade: Number(job.dataset.risk), driving: $('n-drive').value || null,
+        region: $('n-region').value || null,
       });
       location.hash = `#/customers/${c.id}`;
     } catch (e) { showError($('n-err'), e); }
@@ -461,7 +489,7 @@ const PROFILE_QUESTIONS = [
 
 async function customerDetail(params, id) {
   const view = activeView;
-  const d = await api(`/core/customers/${id}`);
+  const [d, regionList] = await Promise.all([api(`/core/customers/${id}`), regions()]);
   const c = d.customer;
   const validConsent = d.consents.find((x) => x.valid);
   view.innerHTML = `
@@ -484,6 +512,7 @@ async function customerDetail(params, id) {
       <dt>연락처</dt><dd>${esc(maskPhone(c.phone))}</dd><dt>직업</dt><dd>${esc(c.occupation)} (위험 ${c.jobRiskGrade}등급)</dd>
       <dt>운전</dt><dd><select id="drive" style="max-width:150px"><option value="">미확인</option>${Object.entries(DRIVING).map(([k, v]) => `<option value="${k}" ${c.driving === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
         <span class="small muted">이륜·영업용은 상해 할증, 비운전은 운전자보험 불가</span></dd>
+      <dt>거주 지역</dt><dd><select id="region" style="max-width:150px">${c.region ? '' : '<option value="">미확인</option>'}${regionList.map((r) => `<option value="${r.code}" ${c.region === r.code ? 'selected' : ''}>${esc(r.label)}</option>`).join('')}</select></dd>
       <dt>소비자 구분</dt><dd>${consumerTag(c)}</dd><dt>등록일</dt><dd>${dt(c.createdAt)}</dd></dl></div>
     <div class="card"><h2>투자성향 (변액보험 적합성)</h2>
       <p>${c.investmentProfileLabel ? `${tag(c.investmentProfileLabel, 't-info')} <span class="small muted">진단 ${dt(c.profiledAt)}</span>
@@ -516,7 +545,7 @@ async function customerDetail(params, id) {
     <tr class="click" data-href="#/proposals/${p.id}"><td>${esc(p.proposalNo)}</td><td>${esc(p.productName)}</td><td class="num">${won(p.monthlyPremium)}</td>
     <td>${dt(p.issuedAt)}</td><td>${p.validUntil}</td><td>${esc(p.statusLabel)}</td></tr>`))}</div>
   <div class="card"><h2>계약</h2>${table(['계약번호', '상품', '기간', '담보 (조건)', '월보험료', '상태', ''], d.contracts.map((k) => `
-    <tr><td>${esc(k.contractNo)}<br><span class="small muted">${esc(k.applicationNo || '이관 계약')}</span></td><td>${esc(k.productName)}<br><span class="small muted">${esc(k.productType)}</span></td>
+    <tr><td><a href="#/contracts/${k.id}">${esc(k.contractNo)}</a><br><span class="small muted">${esc(k.applicationNo || '이관 계약')}${k.agentName ? ` · ${esc(k.agentName)}` : ''}</span></td><td>${esc(k.productName)}<br><span class="small muted">${esc(k.productType)}</span></td>
     <td class="small">${k.startDate}<br>~ ${k.endDate}</td>
     <td class="small">${k.coverages.map((v) => `${esc(v.name)} ${v.insuredAmount ? amountText(v.insuredAmount) : ''}${v.ratingPct ? ` <span class="t-warn">할증 ${v.ratingPct}%</span>` : ''}${v.exclusions.length ? `<br><span class="t-warn">${exclusionText(v.exclusions)}</span>` : ''}`).join('<br>')}</td>
     <td class="num">${won(k.monthlyPremium)}</td><td>${tag(...(CONTRACT_STATUS[k.status] || [k.status, 't-muted']))}</td>
@@ -550,10 +579,10 @@ async function customerDetail(params, id) {
       } catch (e) { showError($('c-err'), e); }
     };
   }
-  $('drive').onchange = async () => {
+  $('drive').onchange = $('region').onchange = async () => {
     try {
       await api(`/core/customers/${id}`, { method: 'PUT', body: JSON.stringify({ name: c.name, phone: c.phone, consumerType: c.consumerType,
-        occupation: c.occupation, jobRiskGrade: c.jobRiskGrade, driving: $('drive').value || null }) });
+        occupation: c.occupation, jobRiskGrade: c.jobRiskGrade, driving: $('drive').value || null, region: $('region').value || null }) });
       route();
     } catch (e) { showError($('c-err'), e); }
   };
@@ -590,6 +619,48 @@ async function customerDetail(params, id) {
   view.querySelectorAll('.withdraw').forEach((b) => (b.onclick = async () => {
     try { await post(`/core/contracts/${b.dataset.id}/withdraw`, {}); route(); } catch (e) { showError($('w-err'), e); }
   }));
+}
+
+// ============================================================ 계약 · 수납
+async function contractDetail(params, id) {
+  const view = activeView;
+  const L = await api(`/core/contracts/${id}/payments`);
+  const k = L.contract;
+  const unpaidOverdue = L.lines.filter((x) => x.overdue);
+  view.innerHTML = `
+  <div class="actions"><h1>${esc(k.contractNo)}</h1>${tag(...(CONTRACT_STATUS[k.status] || [k.statusLabel, 't-muted']))}
+    ${k.statusChangedOn && k.status !== 'ACTIVE' ? `<span class="small muted">${k.statusChangedOn} ${esc(k.statusLabel)}</span>` : ''}</div>
+  <p class="sub"><a href="#/customers/${k.customerId}">← ${esc(k.customerName)}</a> · ${esc(k.productName)} (${esc(k.productType)})</p>
+  ${k.status === 'LAPSED' ? `<div class="notice bad">보험료 미납으로 <b>실효</b>된 계약입니다 (${k.statusChangedOn}). 실효 기간의 사고는 보장되지 않습니다.
+      실효일로부터 3년 안에 밀린 보험료를 모두 내면 <b>부활</b>할 수 있습니다.
+      <div class="actions" style="margin-top:8px"><button class="btn sm" id="reinstate">부활 신청 — 밀린 보험료 납입</button></div></div>`
+    : unpaidOverdue.length ? `<div class="notice">미납 ${unpaidOverdue.length}회차 (${won(L.unpaidAmount)}) — 납입유예기간 <b>${L.graceEnd}</b>까지 내지 않으면 실효됩니다.</div>` : ''}
+  <div class="grid2">
+    <div class="card"><h2>계약</h2><dl class="kv">
+      <dt>보험기간</dt><dd>${k.startDate} ~ ${k.endDate}</dd>
+      <dt>납입</dt><dd>${k.paymentTerm === 1 ? '1년 갱신' : k.paymentTerm + '년납'} · 월 ${won(k.monthlyPremium)}</dd>
+      <dt>모집 설계사</dt><dd>${k.agentName ? `${esc(k.agentName)} <span class="small muted">${esc(k.agentBranch)}</span>` : '<span class="muted">미지정</span>'}</dd>
+      <dt>청약</dt><dd>${esc(k.applicationNo || '이관 계약')}</dd>
+      <dt>담보</dt><dd class="small">${k.coverages.map((v) => `${esc(v.name)} ${v.insuredAmount ? amountText(v.insuredAmount) : ''}${v.ratingPct ? ` <span class="t-warn">할증 ${v.ratingPct}%</span>` : ''}`).join('<br>')}</dd></dl></div>
+    <div class="card"><h2>수납</h2><dl class="kv">
+      <dt>납입 현황</dt><dd><b>${L.paidCount}</b> / ${L.totalInstallments}회차 · 누계 ${won(L.paidAmount)}</dd>
+      <dt>미납</dt><dd>${L.unpaidCount ? `<span class="t-bad">${L.unpaidCount}회차 · ${won(L.unpaidAmount)}</span>` : '없음'}</dd>
+      <dt>다음 납입기일</dt><dd>${L.nextDueDate || (k.status === 'ACTIVE' ? '납입 완료' : `<span class="muted">청구 중지 (${esc(k.statusLabel)})</span>`)}</dd>
+      <dt>납입방법</dt><dd>${k.status === 'ACTIVE' ? `<select id="method" style="max-width:190px">
+        ${[['AUTO_TRANSFER', '자동이체'], ['DIRECT', '직접납입(가상계좌)']].map(([v, l]) => `<option value="${v}" ${L.paymentMethodLabel === l ? 'selected' : ''}>${l}</option>`).join('')}</select>` : esc(L.paymentMethodLabel)}</dd></dl>
+      ${k.status === 'ACTIVE' && L.unpaidCount ? `<div class="actions" style="margin-top:10px"><button class="btn sm" id="pay">미납 보험료 납입 (${L.lines.filter((x) => x.status === 'UNPAID').at(-1).installmentNo}회차)</button></div>` : ''}
+      <div class="error" id="p-err" hidden></div></div>
+  </div>
+  <div class="card"><h2>수납 원장 <span class="small muted">최근 회차부터 · 납입유예기간 = 납입기일 다음 달 말일</span></h2>
+    ${table(['회차', '납입기일', '유예기간', '금액', '상태', '납입일', '방법'], L.lines.slice(0, 36).map((x) => `
+      <tr><td class="num">${x.installmentNo}</td><td>${x.dueDate}</td><td class="small muted">${x.graceEnd}</td><td class="num">${won(x.amount)}</td>
+      <td>${x.status === 'PAID' ? tag('납입', 't-ok') : tag(x.overdue ? '미납' : '청구', x.overdue ? 't-bad' : 't-warn')}</td>
+      <td>${x.paidOn || '-'}</td><td class="small">${esc(x.methodLabel || '-')}</td></tr>`), '수납 이력이 없습니다.')}
+    ${L.lines.length > 36 ? `<p class="small muted">이전 ${L.lines.length - 36}회차 생략</p>` : ''}</div>`;
+  const act = async (fn) => { $('p-err').hidden = true; try { await fn(); route(); } catch (e) { showError($('p-err'), e); } };
+  if ($('pay')) $('pay').onclick = () => act(() => post(`/core/contracts/${id}/payments`, { method: 'DIRECT' }));
+  if ($('reinstate')) $('reinstate').onclick = () => act(() => post(`/core/contracts/${id}/reinstate`, { method: 'DIRECT' }));
+  if ($('method')) $('method').onchange = () => act(() => put(`/core/contracts/${id}/payment-method`, { method: $('method').value }));
 }
 
 // ============================================================ 상품
@@ -637,9 +708,17 @@ async function design(params) {
   <h1>가입설계</h1>
   <p class="sub">고객과 상품을 고르고 담보·가입금액(저축성은 월 납입액·펀드)을 정해 보험료를 계산한 뒤 설계서를 발행합니다.</p>
   <div class="wizard"><span class="on">1. 고객·상품</span><span>2. 설계·보험료</span><span>3. 설계서 발행</span><span>4. 선심사</span><span>5. 청약</span></div>
+  <div class="agent-bar"><label for="agent">담당 설계사</label><select id="agent"></select>
+    <span class="small muted">설계서·청약·계약에 모집 설계사로 남습니다 (정보계 설계사·지점 실적)</span></div>
   <div class="card"><h2>1. 고객</h2><div id="cust"></div></div>
   <div class="card"><h2>2. 상품</h2><div id="prod"></div></div>
   <div id="form"></div><div id="quote"></div>`;
+  const agentList = await agents();
+  const groups = Object.groupBy ? Object.groupBy(agentList, (a) => a.branch) : agentList.reduce((m, a) => ((m[a.branch] ??= []).push(a), m), {});
+  $('agent').innerHTML = Object.entries(groups).map(([branch, list]) => `<optgroup label="${esc(list[0].regionLabel)} · ${esc(branch)}">
+    ${list.map((a) => `<option value="${a.id}">${esc(a.name)} (${esc(a.code)})</option>`).join('')}</optgroup>`).join('');
+  if (agentList.some((a) => String(a.id) === savedAgent.get())) $('agent').value = savedAgent.get();
+  $('agent').onchange = () => savedAgent.set($('agent').value);
   let customer = null, product = null;
   let pendingPlan = params.get('plan');   // 상품 목록에서 플랜 카드를 눌러 들어온 경우
   const refresh = () => {
@@ -872,6 +951,7 @@ function designBody(customer, product, ack) {
     funds: product.variable ? [...activeView.querySelectorAll('.fund')].filter((f) => Number(f.value) > 0)
       .map((f) => ({ fundCode: f.dataset.code, pct: Number(f.value) })) : null,
     unsuitableAcknowledged: ack,
+    agentId: $('agent')?.value ? Number($('agent').value) : null,
   };
 }
 

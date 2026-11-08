@@ -2,6 +2,7 @@ package com.ax.core.customer;
 
 import com.ax.core.common.BusinessException;
 import com.ax.core.common.NotFoundException;
+import com.ax.core.common.Region;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -34,9 +35,10 @@ public class CustomerService {
     /** 신규 고객: 실제 주민번호는 받지 않고 생년월일·성별로 가상 주민번호를 만들어 암호화 저장한다. */
     @Transactional
     public Customer create(String name, LocalDate birthDate, Gender gender, String phone, ConsumerType consumerType,
-                           String occupation, int jobRiskGrade, DrivingType driving) {
+                           String occupation, int jobRiskGrade, DrivingType driving, Region region) {
         Customer c = new Customer(name, birthDate, gender, phone, consumerType, occupation, jobRiskGrade);
         c.changeDriving(driving);
+        c.changeRegion(region);
         assignVirtualRrn(c);
         return customerRepository.save(c);
     }
@@ -63,7 +65,7 @@ public class CustomerService {
         String name = SURNAMES[rnd.nextInt(SURNAMES.length)] + GIVEN[rnd.nextInt(GIVEN.length)] + GIVEN[rnd.nextInt(GIVEN.length)];
         String phone = "010-0000-%04d".formatted(rnd.nextInt(10000));
         Customer c = create(name, birth, gender, phone, spec.consumerType() == null ? ConsumerType.GENERAL : spec.consumerType(),
-                (String) job[0], (int) job[1], driving);
+                (String) job[0], (int) job[1], driving, Region.weighted(rnd.nextDouble()));
         c.markVirtual();
         return c;
     }

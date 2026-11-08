@@ -1,5 +1,6 @@
 package com.ax.core.proposal;
 
+import com.ax.core.agent.AgentRepository;
 import com.ax.core.common.BusinessException;
 import com.ax.core.common.NotFoundException;
 import com.ax.core.customer.Customer;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ProposalService {
 
+    private final AgentRepository agentRepository;
     private final PremiumCalculator calculator;
     private final ProposalRepository proposalRepository;
     private final CustomerRepository customerRepository;
@@ -33,6 +35,11 @@ public class ProposalService {
     /** 설계서 발행: 부적합 상품은 고객 확인이 있어야 발행된다 */
     @Transactional
     public Proposal issue(Long customerId, Long productId, PremiumCalculator.Input input) {
+        return issue(customerId, productId, input, null);
+    }
+
+    @Transactional
+    public Proposal issue(Long customerId, Long productId, PremiumCalculator.Input input, Long agentId) {
         PremiumCalculator.Quote q = calculator.quote(product(productId), customer(customerId), input);
         if (q.suitability() == Suitability.UNSUITABLE) {
             throw new BusinessException("부적합: " + String.join(" ", q.suitabilityIssues())
@@ -40,7 +47,11 @@ public class ProposalService {
         }
         // 발행한 설계의 임시저장은 더 이상 필요 없다
         draftRepository.findByCustomerIdAndProductId(customerId, productId).ifPresent(draftRepository::delete);
-        return proposalRepository.save(new Proposal(newProposalNo(), q));
+        Proposal proposal = new Proposal(newProposalNo(), q);
+        if (agentId != null) {
+            proposal.assignAgent(agentRepository.findById(agentId).orElseThrow(() -> new NotFoundException("설계사", agentId)));
+        }
+        return proposalRepository.save(proposal);
     }
 
     @Transactional(readOnly = true)

@@ -4,6 +4,7 @@ import com.ax.core.application.ApplicationController;
 import com.ax.core.application.ApplicationRepository;
 import com.ax.core.claim.ClaimRepository;
 import com.ax.core.common.NotFoundException;
+import com.ax.core.common.Region;
 import com.ax.core.contract.ContractController;
 import com.ax.core.contract.ContractRepository;
 import com.ax.core.external.ExternalMedicalRecordRepository;
@@ -62,13 +63,13 @@ public class CustomerController {
     public record CreateRequest(@NotBlank @Size(max = 50) String name, @NotNull @Past LocalDate birthDate,
                                 @NotNull Gender gender, @Pattern(regexp = PHONE, message = "010-0000-0000 형식") String phone,
                                 @NotNull ConsumerType consumerType, @NotBlank @Size(max = 50) String occupation,
-                                @Min(1) @Max(3) int jobRiskGrade, DrivingType driving) {
+                                @Min(1) @Max(3) int jobRiskGrade, DrivingType driving, Region region) {
     }
 
     public record UpdateRequest(@NotBlank @Size(max = 50) String name,
                                 @Pattern(regexp = PHONE, message = "010-0000-0000 형식") String phone,
                                 @NotNull ConsumerType consumerType, @NotBlank @Size(max = 50) String occupation,
-                                @Min(1) @Max(3) int jobRiskGrade, DrivingType driving) {
+                                @Min(1) @Max(3) int jobRiskGrade, DrivingType driving, Region region) {
     }
 
     public record RelationRequest(@NotNull Long relativeId, @NotNull Relation relation) {
@@ -101,7 +102,8 @@ public class CustomerController {
     public record Response(Long id, String name, LocalDate birthDate, int age, int insuranceAge, LocalDate nextAgeUpDate,
                            Gender gender, String phone, CustomerStatus status, String statusLabel,
                            ConsumerType consumerType, String consumerTypeLabel, String occupation, int jobRiskGrade,
-                           DrivingType driving, String drivingLabel, boolean virtual, String rrnMasked,
+                           DrivingType driving, String drivingLabel, Region region, String regionLabel,
+                           boolean virtual, String rrnMasked,
                            InvestmentProfile investmentProfile, String investmentProfileLabel, LocalDateTime profiledAt,
                            boolean profiledToday, boolean protectedSenior, LocalDateTime createdAt) {
         static Response from(Customer c) {
@@ -109,7 +111,8 @@ public class CustomerController {
             return new Response(c.getId(), c.getName(), c.getBirthDate(), c.ageAt(today), c.insuranceAgeAt(today),
                     c.nextAgeUpDate(today), c.getGender(), c.getPhone(), c.statusOrProspect(), c.statusOrProspect().getLabel(),
                     c.getConsumerType(), c.getConsumerType().getLabel(), c.getOccupation(), c.getJobRiskGrade(),
-                    c.getDriving(), c.getDriving() == null ? "미확인" : c.getDriving().getLabel(), c.isVirtual(), c.getRrnMasked(),
+                    c.getDriving(), c.getDriving() == null ? "미확인" : c.getDriving().getLabel(),
+                    c.getRegion(), c.getRegion() == null ? "미확인" : c.getRegion().getLabel(), c.isVirtual(), c.getRrnMasked(),
                     c.getInvestmentProfile(), c.getInvestmentProfile() == null ? null : c.getInvestmentProfile().getLabel(),
                     c.getProfiledAt(), c.isProfiledOn(today), c.isProtectedSenior(today), c.getCreatedAt());
         }
@@ -158,7 +161,7 @@ public class CustomerController {
     @ResponseStatus(HttpStatus.CREATED)
     public Response create(@Valid @RequestBody CreateRequest req) {
         return Response.from(customerService.create(req.name().trim(), req.birthDate(), req.gender(), req.phone(),
-                req.consumerType(), req.occupation().trim(), req.jobRiskGrade(), req.driving()));
+                req.consumerType(), req.occupation().trim(), req.jobRiskGrade(), req.driving(), req.region()));
     }
 
     /** 가상고객 즉시 생성 (시나리오·테스트용) */
@@ -191,7 +194,7 @@ public class CustomerController {
     @Transactional
     public Response update(@PathVariable Long id, @Valid @RequestBody UpdateRequest req) {
         Customer c = find(id);
-        c.update(req.name().trim(), req.phone(), req.occupation().trim(), req.jobRiskGrade(), req.consumerType(), req.driving());
+        c.update(req.name().trim(), req.phone(), req.occupation().trim(), req.jobRiskGrade(), req.consumerType(), req.driving(), req.region());
         return Response.from(c);
     }
 

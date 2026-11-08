@@ -46,6 +46,8 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-ax}
       AI_BASE_URL: http://api:8000
       AX_DEMO_ENABLED: "true"
+      # 업무 날짜(납입기일·청약철회 기한·보험나이)는 한국 시간 기준 (troubleshooting #16)
+      TZ: Asia/Seoul
       AX_SEED_ENABLED: ${AX_SEED_ENABLED:-true}
       AX_SEED_CUSTOMERS: ${AX_SEED_CUSTOMERS:-30000}
       AX_SEED_EXTERNAL: ${AX_SEED_EXTERNAL:-50000}

@@ -1,5 +1,6 @@
 package com.ax.core.application;
 
+import com.ax.core.agent.Agent;
 import com.ax.core.common.BaseTimeEntity;
 import com.ax.core.common.BusinessException;
 import com.ax.core.customer.Customer;
@@ -50,6 +51,11 @@ public class Application extends BaseTimeEntity {
     @JoinColumn(name = "customer_id")
     private Customer customer;
 
+    /** 담당 설계사 (null 은 미지정 — 컬럼 추가 전 데이터) */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "agent_id")
+    private Agent agent;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id")
     private Product product;
@@ -97,6 +103,7 @@ public class Application extends BaseTimeEntity {
         this.applicationNo = applicationNo;
         this.proposal = proposal;
         this.customer = proposal.getCustomer();
+        this.agent = proposal.getAgent();
         this.product = proposal.getProduct();
         this.questionnaire = questionnaire;
         this.paymentTerm = proposal.getPaymentTerm();

@@ -84,10 +84,12 @@ public class ApplicationController {
     }
 
     public record Summary(Long id, String applicationNo, Long customerId, String customerName, String productName,
-                          ApplicationStatus status, String statusLabel, long monthlyPremium, LocalDateTime submittedAt) {
+                          ApplicationStatus status, String statusLabel, long monthlyPremium, LocalDateTime submittedAt,
+                          String agentName) {
         public static Summary from(Application a) {
             return new Summary(a.getId(), a.getApplicationNo(), a.getCustomer().getId(), a.getCustomer().getName(),
-                    a.getProduct().getName(), a.getStatus(), a.getStatus().getLabel(), a.getMonthlyPremium(), a.getSubmittedAt());
+                    a.getProduct().getName(), a.getStatus(), a.getStatus().getLabel(), a.getMonthlyPremium(), a.getSubmittedAt(),
+                    a.getAgent() == null ? null : a.getAgent().getName());
         }
     }
 
